@@ -1,3 +1,8 @@
+# CUDA 12.8 runtime covers Ampere (sm_86) through Blackwell (sm_120) for the
+# upcoming AI inference backends; ffmpeg comes from Ubuntu for now.
+# Declared before the first stage so it is usable in FROM lines.
+ARG BASE_IMAGE=nvidia/cuda:12.8.0-runtime-ubuntu24.04
+
 FROM node:22-slim AS ui
 WORKDIR /ui
 COPY frontend/package.json frontend/package-lock.json ./
@@ -5,9 +10,6 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
-# CUDA 12.8 runtime covers Ampere (sm_86) through Blackwell (sm_120) for the
-# upcoming AI inference backends; ffmpeg comes from Ubuntu for now.
-ARG BASE_IMAGE=nvidia/cuda:12.8.0-runtime-ubuntu24.04
 FROM ${BASE_IMAGE}
 
 ENV DEBIAN_FRONTEND=noninteractive
