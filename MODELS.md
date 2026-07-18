@@ -70,6 +70,25 @@ This is where Topaz historically won outright. The 2025 open releases changed it
   SeedVR2-7B via block swap. System RAM matters too (~32 GB recommended for
   FlashVSR-class pipelines).
 
+### Reference target: 12 GB (RTX 3080 Ti now → RTX 5070 later)
+
+The primary dev/deploy target is a 12 GB card, so 12 GB is the hard budget for
+default quality-tier presets:
+
+- SeedVR2 **3B** (FP16) fits comfortably at 12 GB — make it the default
+  quality-tier model. 7B is offered as an opt-in "max quality" preset using
+  aggressive block swap (slower, still functional at 12 GB).
+- FlashVSR runs at 12 GB via community tiling forks — enable tiling by default.
+- Architecture gotchas the app must absorb:
+  - **FP8 needs Ada/Hopper/Blackwell.** Ampere (3080 Ti) has no FP8 tensor
+    cores — FP8 checkpoints save VRAM there but not time. Auto-pick precision
+    per GPU generation (FP16 on Ampere, FP8 on Blackwell).
+  - **TensorRT engines are per-architecture.** Cache built engines keyed by
+    GPU compute capability + model hash; rebuild transparently after a GPU
+    swap (sm_86 → sm_120).
+  - **Blackwell requires CUDA 12.8+.** Base image must be new enough to cover
+    both sm_86 and sm_120 in one build.
+
 ## Design implications
 
 1. Two-tier model strategy baked into presets (fast vs quality).
