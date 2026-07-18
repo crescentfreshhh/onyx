@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>Onyx</Name>
+  <Repository>ghcr.io/crescentfreshhh/onyx:latest</Repository>
+  <Registry>https://ghcr.io/crescentfreshhh/onyx</Registry>
+  <Network>bridge</Network>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/crescentfreshhh/onyx/issues</Support>
+  <Project>https://github.com/crescentfreshhh/onyx</Project>
+  <Overview>Self-hosted AI video enhancement server: upscaling, frame interpolation, deinterlacing and restoration with a queue-based workflow. Web UI on port 8484. For NVIDIA GPU acceleration install the Nvidia Driver plugin and set the Extra Parameters to: --runtime=nvidia</Overview>
+  <Category>MediaApp:Video</Category>
+  <WebUI>http://[IP]:[PORT:8484]</WebUI>
+  <ExtraParams></ExtraParams>
+  <Icon>https://raw.githubusercontent.com/crescentfreshhh/onyx/main/unraid/icon.png</Icon>
+  <Config Name="WebUI Port" Target="8484" Default="8484" Mode="tcp" Description="Web interface port" Type="Port" Display="always" Required="true" Mask="false">8484</Config>
+  <Config Name="Appdata" Target="/config" Default="/mnt/user/appdata/onyx" Mode="rw" Description="Settings, database and downloaded models" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/onyx</Config>
+  <Config Name="Input" Target="/input" Default="" Mode="ro" Description="Source videos (read-only)" Type="Path" Display="always" Required="true" Mask="false"></Config>
+  <Config Name="Output" Target="/output" Default="" Mode="rw" Description="Rendered videos" Type="Path" Display="always" Required="true" Mask="false"></Config>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User ID" Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group ID" Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
+  <Config Name="NVIDIA_VISIBLE_DEVICES" Target="NVIDIA_VISIBLE_DEVICES" Default="all" Mode="" Description="GPU UUID or 'all' (requires Nvidia Driver plugin and --runtime=nvidia in Extra Parameters)" Type="Variable" Display="always" Required="false" Mask="false">all</Config>
+</Container>
