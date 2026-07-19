@@ -197,6 +197,50 @@ def convert_model(model_id: str):
     return {"ok": True}
 
 
+@router.get("/diagnostics")
+def diagnostics():
+    def dir_report(path: Path) -> dict:
+        info: dict = {"path": str(path), "exists": path.is_dir()}
+        if path.is_dir():
+            test = path / ".onyx_write_test"
+            try:
+                test.write_text("x")
+                test.unlink()
+                info["writable"] = True
+            except OSError as exc:
+                info["writable"] = False
+                info["write_error"] = str(exc)
+        return info
+
+    output_files = []
+    if config.OUTPUT_DIR.is_dir():
+        for child in sorted(config.OUTPUT_DIR.iterdir()):
+            if child.is_file():
+                output_files.append({"name": child.name, "size": child.stat().st_size})
+
+    recent = []
+    for job in db.list_jobs()[:8]:
+        out = Path(job["output_path"])
+        recent.append({
+            "id": job["id"],
+            "status": job["status"],
+            "output_path": job["output_path"],
+            "output_exists": out.is_file(),
+            "output_size": out.stat().st_size if out.is_file() else None,
+            "error": job["error"],
+        })
+
+    return {
+        "config": dir_report(config.CONFIG_DIR),
+        "input": dir_report(config.INPUT_DIR),
+        "output": dir_report(config.OUTPUT_DIR),
+        "output_files": output_files,
+        "ffmpeg": shutil.which(config.FFMPEG),
+        "ffprobe": shutil.which(config.FFPROBE),
+        "recent_jobs": recent,
+    }
+
+
 @router.get("/system")
 def system_info():
     gpu = None
