@@ -279,13 +279,34 @@ async def run_ai(
     dec_err = asyncio.create_task(decoder.stderr.read())
     enc_err = asyncio.create_task(encoder.stderr.read())
 
+    def _hard_stop() -> None:
+        # SIGKILL (not SIGTERM): on SIGTERM ffmpeg stops reading stdin but
+        # keeps the pipe open, deadlocking a blocked drain(). Aborting the
+        # write transport unblocks any pending drain() deterministically.
+        for proc in (decoder, encoder):
+            if proc.returncode is None:
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+        # Release every pipe fd so the subprocess transports can finalize;
+        # a lingering read transport keeps proc.wait() from resolving.
+        if encoder.stdin is not None:
+            try:
+                encoder.stdin.transport.abort()
+            except Exception:
+                pass
+        for stream in (decoder.stdout, decoder.stderr, encoder.stderr):
+            transport = getattr(stream, "_transport", None)
+            if transport is not None:
+                try:
+                    transport.close()
+                except Exception:
+                    pass
+
     async def watch_cancel() -> None:
-        # Terminate both processes the moment cancel is requested so blocked
-        # pipe reads/writes unblock immediately instead of after the current
-        # (possibly slow) inference step.
         await cancel_event.wait()
-        decoder.terminate()
-        encoder.terminate()
+        _hard_stop()
 
     cancel_task = asyncio.create_task(watch_cancel())
 
@@ -298,6 +319,8 @@ async def run_ai(
     async def emit(frame: np.ndarray) -> None:
         nonlocal frames_out
         assert encoder.stdin is not None
+        if cancel_event.is_set():
+            raise asyncio.CancelledError()
         if encoder.returncode is not None or encoder.stdin.is_closing():
             raise await encoder_failed()
         try:
@@ -341,6 +364,8 @@ async def run_ai(
             try:
                 raw = await decoder.stdout.readexactly(frame_bytes)
             except asyncio.IncompleteReadError:
+                if cancel_event.is_set():
+                    raise asyncio.CancelledError()
                 break
             frame = np.frombuffer(raw, dtype=np.uint8).reshape(height, width, 3)
             current = [frame, None]
@@ -379,15 +404,22 @@ async def run_ai(
         encoder.stdin.close()
         await asyncio.gather(decoder.wait(), encoder.wait())
     except asyncio.CancelledError:
-        decoder.terminate()
-        encoder.terminate()
-        await asyncio.gather(decoder.wait(), encoder.wait())
+        # Cancel the stderr readers first: while they hold the pipe
+        # transports open, proc.wait() can deadlock. Bound the reap so
+        # cancellation can never hang the worker regardless.
+        _hard_stop()
+        for reader in (dec_err, enc_err):
+            reader.cancel()
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(decoder.wait(), encoder.wait(), return_exceptions=True),
+                timeout=5,
+            )
+        except asyncio.TimeoutError:
+            pass
         raise
     finally:
         cancel_task.cancel()
-        for task in (dec_err, enc_err):
-            if not task.done():
-                task.cancel()
 
     if decoder.returncode != 0:
         stderr = (await dec_err).decode(errors="replace")

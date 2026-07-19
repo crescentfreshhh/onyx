@@ -158,6 +158,37 @@ def test_fps_change_end_to_end(blend_model, tmp_path):
 
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not available")
+def test_cancel_stops_ai_render_promptly(blend_model, tmp_path):
+    source = tmp_path / "long.mkv"
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-f", "lavfi", "-i",
+         "testsrc=duration=20:size=640x480:rate=24", "-pix_fmt", "yuv420p", str(source)],
+        check=True,
+    )
+    info = {"width": 640, "height": 480, "fps": 24.0, "duration": 20.0}
+    settings = JobSettings.model_validate({"interpolate": {"enabled": True, "fps": 60}})
+
+    async def noop(progress, fps, eta):
+        return None
+
+    async def run():
+        cancel = asyncio.Event()
+        task = asyncio.create_task(engines.run_ai(
+            str(source), str(tmp_path / "out.mkv"), settings, info, noop, cancel,
+            interp_model=blend_model,
+        ))
+        await asyncio.sleep(1.5)
+        cancel.set()
+        started = asyncio.get_event_loop().time()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=10)
+        # Must unwind quickly, not ride the reap timeout or hang.
+        assert asyncio.get_event_loop().time() - started < 8
+
+    asyncio.run(run())
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not available")
 def test_upscale_and_interpolate_combined(blend_model, tmp_path):
     onnx = pytest.importorskip("onnx")
     pytest.importorskip("onnxruntime")

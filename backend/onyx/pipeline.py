@@ -191,7 +191,17 @@ async def run(
 
     async def watch_cancel() -> None:
         await cancel_event.wait()
-        proc.terminate()
+        if proc.returncode is None:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+        transport = getattr(proc.stdout, "_transport", None)
+        if transport is not None:
+            try:
+                transport.close()
+            except Exception:
+                pass
 
     cancel_task = asyncio.create_task(watch_cancel())
     try:
