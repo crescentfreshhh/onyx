@@ -21,6 +21,28 @@ async def probe(path: str) -> Optional[dict[str, Any]]:
     return parse_probe(json.loads(stdout))
 
 
+async def validate_output(path: str) -> Optional[str]:
+    """Return None if the file is a decodable video, else an error string.
+
+    Catches outputs that exit 0 but are unplayable (e.g. some NVENC/driver
+    failures) before a job is reported complete. Decodes the first second
+    only — cheap, and enough to expose a bad container/header/stream.
+    """
+    proc = await asyncio.create_subprocess_exec(
+        config.FFMPEG, "-v", "error", "-t", "1", "-i", path, "-f", "null", "-",
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        detail = stderr.decode(errors="replace").strip()[-400:]
+        return detail or f"ffmpeg could not decode the output (exit {proc.returncode})"
+    info = await probe(path)
+    if info is None or info["width"] == 0 or info["duration"] <= 0:
+        return "output has no valid video stream or zero duration"
+    return None
+
+
 def parse_probe(raw: dict) -> dict[str, Any]:
     video = next((s for s in raw.get("streams", []) if s.get("codec_type") == "video"), {})
     fmt = raw.get("format", {})

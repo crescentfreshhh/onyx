@@ -133,6 +133,9 @@ class Worker:
                     on_progress,
                     cancel,
                 )
+            problem = await media.validate_output(job["output_path"])
+            if problem is not None:
+                raise RuntimeError(f"render finished but the output is not playable: {problem}")
             db.update_job(job_id, status="completed", progress=1.0, eta_seconds=None,
                           finished_at=time.time())
             log.info("job %d completed", job_id)
