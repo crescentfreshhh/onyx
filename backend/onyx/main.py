@@ -1,4 +1,5 @@
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -10,6 +11,11 @@ from .api import router
 from .queue import worker
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+
+# Rendered files must be readable over SMB/NFS by other users; a restrictive
+# container umask otherwise creates 0640 output that network shares can't
+# serve. 0o002 -> new files are 0664 (world-readable).
+os.umask(0o002)
 
 
 @asynccontextmanager

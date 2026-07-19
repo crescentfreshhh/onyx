@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import shutil
 import time
 from pathlib import Path
@@ -136,6 +137,13 @@ class Worker:
             problem = await media.validate_output(job["output_path"])
             if problem is not None:
                 raise RuntimeError(f"render finished but the output is not playable: {problem}")
+            # Ensure the output is world-readable so SMB/other users can open
+            # it; a restrictive container umask otherwise yields 0640 files
+            # that network shares cannot serve.
+            try:
+                os.chmod(job["output_path"], 0o664)
+            except OSError as exc:
+                log.warning("could not chmod output %s: %s", job["output_path"], exc)
             db.update_job(job_id, status="completed", progress=1.0, eta_seconds=None,
                           finished_at=time.time())
             log.info("job %d completed", job_id)
