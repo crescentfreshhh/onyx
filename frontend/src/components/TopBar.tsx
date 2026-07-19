@@ -16,8 +16,8 @@ export function TopBar({ system, onOpen, onModels }: Props) {
       <button onClick={onOpen}>Open Video…</button>
       <button onClick={onModels}>Models…</button>
       <div className="spacer" />
-      <div className="gpu">
-        {system?.gpu ?? "No GPU detected"}
+      <div className="gpu" title={system?.gpu_error ?? undefined}>
+        {system?.gpu ?? (system?.gpu_error ? "No GPU — hover for why" : "No GPU detected")}
         {system && !system.ffmpeg && " · ffmpeg missing!"}
       </div>
     </div>

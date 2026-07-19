@@ -74,6 +74,7 @@ export interface CatalogModel {
 export interface SystemInfo {
   version: string;
   gpu: string | null;
+  gpu_error: string | null;
   ffmpeg: boolean;
 }
 

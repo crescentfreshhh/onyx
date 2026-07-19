@@ -181,7 +181,12 @@ def convert_model(model_id: str):
 @router.get("/system")
 def system_info():
     gpu = None
-    if shutil.which("nvidia-smi"):
+    gpu_error = None
+    if shutil.which("nvidia-smi") is None:
+        gpu_error = ("nvidia-smi not present in container — the NVIDIA runtime is not "
+                     "applied. Check '--runtime=nvidia' in Extra Parameters and the "
+                     "Nvidia Driver plugin (driver 570+ required for this image).")
+    else:
         try:
             out = subprocess.run(
                 ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader"],
@@ -189,10 +194,14 @@ def system_info():
             )
             if out.returncode == 0 and out.stdout.strip():
                 gpu = out.stdout.strip().splitlines()[0]
-        except OSError:
-            pass
+            else:
+                detail = (out.stderr or out.stdout or "").strip()[-300:]
+                gpu_error = f"nvidia-smi failed (driver/runtime mismatch?): {detail}"
+        except OSError as exc:
+            gpu_error = f"nvidia-smi could not run: {exc}"
     return {
         "version": config.VERSION,
         "gpu": gpu,
+        "gpu_error": gpu_error,
         "ffmpeg": shutil.which(config.FFMPEG) is not None,
     }
