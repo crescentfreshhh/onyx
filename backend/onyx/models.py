@@ -49,3 +49,10 @@ class JobCreate(BaseModel):
 class PresetCreate(BaseModel):
     name: str
     settings: JobSettings
+
+
+class PreviewCreate(BaseModel):
+    input_path: str
+    settings: JobSettings = JobSettings()
+    start_seconds: float = Field(0, ge=0)
+    duration: float = Field(5, gt=0, le=15)

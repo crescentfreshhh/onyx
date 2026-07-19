@@ -1,9 +1,12 @@
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import type { MediaInfo } from "../types";
+import type { MediaInfo, Preview } from "../types";
 
 interface Props {
   file: string | null;
   info: MediaInfo | null;
+  preview: Preview | null;
+  onClosePreview: () => void;
 }
 
 function fmtDuration(seconds: number): string {
@@ -18,11 +21,78 @@ function fmtSize(bytes: number): string {
   return `${(bytes / (1 << 20)).toFixed(1)} MiB`;
 }
 
-export function PreviewPane({ file, info }: Props) {
+function CompareView({ previewId }: { previewId: string }) {
+  const [position, setPosition] = useState(50);
+  const originalRef = useRef<HTMLVideoElement>(null);
+  const processedRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const original = originalRef.current;
+    const processed = processedRef.current;
+    if (!original || !processed) return;
+    const sync = () => {
+      if (Math.abs(original.currentTime - processed.currentTime) > 0.08) {
+        processed.currentTime = original.currentTime;
+      }
+    };
+    original.addEventListener("timeupdate", sync);
+    return () => original.removeEventListener("timeupdate", sync);
+  }, [previewId]);
+
+  return (
+    <div className="compare">
+      <div className="compare-stage">
+        <video
+          ref={processedRef}
+          src={api.previewUrl(previewId, "processed")}
+          muted
+          loop
+          autoPlay
+          playsInline
+        />
+        <div className="compare-overlay" style={{ clipPath: `inset(0 ${100 - position}% 0 0)` }}>
+          <video
+            ref={originalRef}
+            src={api.previewUrl(previewId, "original")}
+            muted
+            loop
+            autoPlay
+            playsInline
+          />
+        </div>
+        <div className="compare-divider" style={{ left: `${position}%` }} />
+        <span className="compare-label left">Original</span>
+        <span className="compare-label right">Enhanced</span>
+      </div>
+      <input
+        className="compare-slider"
+        type="range"
+        min={0}
+        max={100}
+        value={position}
+        onChange={(e) => setPosition(Number(e.target.value))}
+      />
+    </div>
+  );
+}
+
+export function PreviewPane({ file, info, preview, onClosePreview }: Props) {
   return (
     <div className="preview">
       <div className="stage">
-        {file ? (
+        {preview?.status === "ready" ? (
+          <>
+            <CompareView previewId={preview.id} />
+            <button className="close-preview" onClick={onClosePreview}>
+              ✕ Close preview
+            </button>
+          </>
+        ) : preview?.status === "rendering" ? (
+          <div className="placeholder">
+            <div style={{ fontSize: 32, opacity: 0.4 }}>⟳</div>
+            <div>Rendering preview…</div>
+          </div>
+        ) : file ? (
           <video key={file} src={api.streamUrl(file)} controls />
         ) : (
           <div className="placeholder">

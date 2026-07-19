@@ -1,4 +1,4 @@
-import type { CatalogModel, Job, JobSettings, Preset, FileEntry, MediaInfo, StageModel, SystemInfo } from "./types";
+import type { CatalogModel, Job, JobSettings, Preset, Preview, FileEntry, MediaInfo, StageModel, SystemInfo } from "./types";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(url, init);
@@ -41,4 +41,12 @@ export const api = {
     request<void>(`/api/models/${encodeURIComponent(id)}/download`, { method: "POST" }),
   system: () => request<SystemInfo>("/api/system"),
   streamUrl: (path: string) => `/api/files/stream?path=${encodeURIComponent(path)}`,
+  createPreview: (input_path: string, settings: JobSettings, start_seconds: number) =>
+    request<{ id: string }>("/api/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ input_path, settings, start_seconds }),
+    }),
+  previewStatus: (id: string) => request<Preview>(`/api/preview/${id}`),
+  previewUrl: (id: string, side: "original" | "processed") => `/api/preview/${id}/${side}`,
 };

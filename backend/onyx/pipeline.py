@@ -17,15 +17,43 @@ from .models import JobSettings
 # stage_models() at request time.
 STAGE_MODELS = {
     "enhance": [
-        {"id": "lanczos", "name": "Lanczos (fast, non-AI)", "engine": "ffmpeg"},
+        {
+            "id": "lanczos",
+            "name": "Lanczos (fast, non-AI)",
+            "engine": "ffmpeg",
+            "description": "Plain resampler. A fine choice for pristine sources, "
+                           "where AI adds little — and it's instant.",
+        },
     ],
     "interpolate": [
-        {"id": "dup", "name": "Frame duplication (non-AI)", "engine": "ffmpeg"},
-        {"id": "minterpolate", "name": "Motion interpolation (slow, non-AI)", "engine": "ffmpeg"},
+        {
+            "id": "dup",
+            "name": "Frame duplication (non-AI)",
+            "engine": "ffmpeg",
+            "description": "Reaches the target FPS by repeating frames — no motion "
+                           "smoothing, but never introduces artifacts.",
+        },
+        {
+            "id": "minterpolate",
+            "name": "Motion interpolation (slow, non-AI)",
+            "engine": "ffmpeg",
+            "description": "Motion-compensated blending. Slow, and can warp on "
+                           "complex motion; the RIFE AI engine will supersede it.",
+        },
     ],
     "deinterlace": [
-        {"id": "bwdif", "name": "BWDIF", "engine": "ffmpeg"},
-        {"id": "yadif", "name": "Yadif", "engine": "ffmpeg"},
+        {
+            "id": "bwdif",
+            "name": "BWDIF",
+            "engine": "ffmpeg",
+            "description": "Recommended for DVD and broadcast sources.",
+        },
+        {
+            "id": "yadif",
+            "name": "Yadif",
+            "engine": "ffmpeg",
+            "description": "Legacy alternative — prefer BWDIF unless it misbehaves.",
+        },
     ],
 }
 
@@ -36,9 +64,13 @@ def stage_models() -> dict:
     merged = {stage: list(entries) for stage, entries in STAGE_MODELS.items()}
     for model in modelstore.catalog():
         if model["status"] == "installed":
-            merged.setdefault(model["stage"], []).append(
-                {"id": model["id"], "name": model["name"], "engine": model["engine"]}
-            )
+            merged.setdefault(model["stage"], []).append({
+                "id": model["id"],
+                "name": model["name"],
+                "engine": model["engine"],
+                "description": model.get("description"),
+                "best_for": model.get("best_for"),
+            })
     return merged
 
 ENCODERS = {
@@ -94,21 +126,39 @@ def build_filters(settings: JobSettings) -> list[str]:
     return filters + post_filters(settings)
 
 
-def build_command(input_path: str, output_path: str, settings: JobSettings) -> list[str]:
-    cmd = [config.FFMPEG, "-y", "-hide_banner", "-nostats", "-progress", "pipe:1", "-i", input_path]
+# Encode arguments for browser-playable preview clips, regardless of the
+# job's own output settings.
+PREVIEW_ENCODE = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+                  "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an"]
+
+
+def build_command(
+    input_path: str,
+    output_path: str,
+    settings: JobSettings,
+    segment: Optional[tuple[float, float]] = None,
+    browser_preview: bool = False,
+) -> list[str]:
+    cmd = [config.FFMPEG, "-y", "-hide_banner", "-nostats", "-progress", "pipe:1"]
+    if segment:
+        cmd += ["-ss", str(segment[0]), "-t", str(segment[1])]
+    cmd += ["-i", input_path]
 
     filters = build_filters(settings)
     if filters:
         cmd += ["-vf", ",".join(filters)]
 
-    enc = ENCODERS.get(settings.encode.codec, ENCODERS["libx264"])
-    cmd += [*enc, str(settings.encode.quality)]
-    cmd += ["-pix_fmt", "yuv420p"]
+    if browser_preview:
+        cmd += PREVIEW_ENCODE
+    else:
+        enc = ENCODERS.get(settings.encode.codec, ENCODERS["libx264"])
+        cmd += [*enc, str(settings.encode.quality)]
+        cmd += ["-pix_fmt", "yuv420p"]
 
-    cmd += ["-map", "0:v:0", "-map", "0:a?"]
-    if settings.encode.container == "mkv":
-        cmd += ["-map", "0:s?", "-map_chapters", "0", "-c:s", "copy"]
-    cmd += ["-c:a", "copy"] if settings.encode.audio == "copy" else ["-c:a", "aac", "-b:a", "192k"]
+        cmd += ["-map", "0:v:0", "-map", "0:a?"]
+        if settings.encode.container == "mkv":
+            cmd += ["-map", "0:s?", "-map_chapters", "0", "-c:s", "copy"]
+        cmd += ["-c:a", "copy"] if settings.encode.audio == "copy" else ["-c:a", "aac", "-b:a", "192k"]
 
     cmd.append(output_path)
     return cmd
@@ -125,8 +175,10 @@ async def run(
     source_duration: float,
     on_progress: Callable[[float, Optional[float], Optional[float]], Awaitable[None]],
     cancel_event: asyncio.Event,
+    segment: Optional[tuple[float, float]] = None,
+    browser_preview: bool = False,
 ) -> None:
-    cmd = build_command(input_path, output_path, settings)
+    cmd = build_command(input_path, output_path, settings, segment, browser_preview)
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,

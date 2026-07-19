@@ -9,7 +9,20 @@ interface Props {
   models: Record<string, StageModel[]>;
   onSavePreset: (name: string) => void;
   onAddToQueue: () => void;
+  onPreview: (startSeconds: number) => void;
+  previewBusy: boolean;
   canQueue: boolean;
+}
+
+function ModelHint({ models, selected }: { models: StageModel[]; selected: string }) {
+  const model = models.find((m) => m.id === selected);
+  if (!model?.description) return null;
+  return (
+    <div className="model-hint">
+      {model.best_for && <span className="best-for">{model.best_for}</span>}
+      {model.description}
+    </div>
+  );
 }
 
 interface SectionProps {
@@ -36,7 +49,8 @@ function Section({ title, enabled, onToggle, children }: SectionProps) {
   );
 }
 
-export function FilterPanel({ settings, onChange, presets, models, onSavePreset, onAddToQueue, canQueue }: Props) {
+export function FilterPanel({ settings, onChange, presets, models, onSavePreset, onAddToQueue, onPreview, previewBusy, canQueue }: Props) {
+  const [previewStart, setPreviewStart] = useState(0);
   const set = (patch: Partial<JobSettings>) => onChange({ ...settings, ...patch });
 
   const applyPreset = (id: string) => {
@@ -91,6 +105,7 @@ export function FilterPanel({ settings, onChange, presets, models, onSavePreset,
             ))}
           </select>
         </div>
+        <ModelHint models={models.deinterlace ?? []} selected={settings.deinterlace.engine} />
       </Section>
 
       <Section
@@ -109,6 +124,7 @@ export function FilterPanel({ settings, onChange, presets, models, onSavePreset,
             ))}
           </select>
         </div>
+        <ModelHint models={models.enhance ?? []} selected={settings.enhance.model} />
         <div className="field">
           <label>Scale</label>
           <select
@@ -138,6 +154,7 @@ export function FilterPanel({ settings, onChange, presets, models, onSavePreset,
             ))}
           </select>
         </div>
+        <ModelHint models={models.interpolate ?? []} selected={settings.interpolate.model} />
         <div className="field">
           <label>Target FPS</label>
           <input
@@ -184,6 +201,10 @@ export function FilterPanel({ settings, onChange, presets, models, onSavePreset,
             onChange={(e) => set({ grain: { ...settings.grain, amount: Number(e.target.value) } })}
           />
           <span className="value">{settings.grain.amount}</span>
+        </div>
+        <div className="model-hint">
+          Re-applies natural grain after AI cleaning — recommended for film sources,
+          since upscale models tend to smear original grain.
         </div>
       </Section>
 
@@ -240,6 +261,22 @@ export function FilterPanel({ settings, onChange, presets, models, onSavePreset,
       </div>
 
       <div className="actions">
+        <div className="field">
+          <label>Preview at (s)</label>
+          <input
+            type="number"
+            min={0}
+            step="any"
+            value={previewStart}
+            onChange={(e) => {
+              const start = Number(e.target.value);
+              if (Number.isFinite(start) && start >= 0) setPreviewStart(start);
+            }}
+          />
+        </div>
+        <button disabled={!canQueue || previewBusy} onClick={() => onPreview(previewStart)}>
+          {previewBusy ? "Rendering preview…" : "Preview 5s"}
+        </button>
         <button className="primary" disabled={!canQueue} onClick={onAddToQueue}>
           Add to Queue
         </button>

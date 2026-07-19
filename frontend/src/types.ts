@@ -46,6 +46,14 @@ export interface StageModel {
   id: string;
   name: string;
   engine: string;
+  description?: string;
+  best_for?: string;
+}
+
+export interface Preview {
+  id: string;
+  status: "rendering" | "ready" | "failed";
+  error: string | null;
 }
 
 export interface CatalogModel {
@@ -55,6 +63,8 @@ export interface CatalogModel {
   engine: string;
   scale: number;
   license: string;
+  best_for?: string;
+  description?: string;
   status: "installed" | "downloading" | "available" | "failed" | "missing";
   progress?: number;
   error?: string;

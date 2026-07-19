@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
-import type { Job, JobSettings, MediaInfo, Preset, StageModel, SystemInfo } from "./types";
+import type { Job, JobSettings, MediaInfo, Preset, Preview, StageModel, SystemInfo } from "./types";
 import { defaultSettings } from "./types";
 import { TopBar } from "./components/TopBar";
 import { PreviewPane } from "./components/PreviewPane";
@@ -19,6 +19,7 @@ export default function App() {
   const [info, setInfo] = useState<MediaInfo | null>(null);
   const [browsing, setBrowsing] = useState(false);
   const [managingModels, setManagingModels] = useState(false);
+  const [preview, setPreview] = useState<Preview | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const showError = useCallback((message: string) => {
@@ -43,6 +44,7 @@ export default function App() {
     setBrowsing(false);
     setFile(path);
     setInfo(null);
+    setPreview(null);
     api
       .mediaInfo(path)
       .then((mediaInfo) => {
@@ -62,6 +64,35 @@ export default function App() {
       .catch((e) => showError(String(e.message ?? e)));
   };
 
+  const startPreview = (startSeconds: number) => {
+    if (!file) return;
+    api
+      .createPreview(file, settings, startSeconds)
+      .then(({ id }) => {
+        setPreview({ id, status: "rendering", error: null });
+        const poll = window.setInterval(() => {
+          api
+            .previewStatus(id)
+            .then((status) => {
+              if (status.status !== "rendering") {
+                window.clearInterval(poll);
+                if (status.status === "failed") {
+                  showError(status.error ?? "Preview render failed");
+                  setPreview(null);
+                } else {
+                  setPreview(status);
+                }
+              }
+            })
+            .catch(() => {
+              window.clearInterval(poll);
+              setPreview(null);
+            });
+        }, 1000);
+      })
+      .catch((e) => showError(String(e.message ?? e)));
+  };
+
   const savePreset = (name: string) => {
     api
       .savePreset(name, settings)
@@ -76,7 +107,7 @@ export default function App() {
         onOpen={() => setBrowsing(true)}
         onModels={() => setManagingModels(true)}
       />
-      <PreviewPane file={file} info={info} />
+      <PreviewPane file={file} info={info} preview={preview} onClosePreview={() => setPreview(null)} />
       <FilterPanel
         settings={settings}
         onChange={setSettings}
@@ -84,6 +115,8 @@ export default function App() {
         models={models}
         onSavePreset={savePreset}
         onAddToQueue={addToQueue}
+        onPreview={startPreview}
+        previewBusy={preview?.status === "rendering"}
         canQueue={file != null}
       />
       <QueuePanel jobs={jobs} onChanged={refreshJobs} onError={showError} />

@@ -51,8 +51,15 @@ class OnnxUpscaler:
         return scale
 
 
-def decode_command(input_path: str, settings: JobSettings) -> list[str]:
-    cmd = [config.FFMPEG, "-v", "error", "-i", input_path]
+def decode_command(
+    input_path: str,
+    settings: JobSettings,
+    segment: Optional[tuple[float, float]] = None,
+) -> list[str]:
+    cmd = [config.FFMPEG, "-v", "error"]
+    if segment:
+        cmd += ["-ss", str(segment[0]), "-t", str(segment[1])]
+    cmd += ["-i", input_path]
     filters = pre_filters(settings)
     if filters:
         cmd += ["-vf", ",".join(filters)]
@@ -67,7 +74,10 @@ def encode_command(
     out_width: int,
     out_height: int,
     fps: float,
+    browser_preview: bool = False,
 ) -> list[str]:
+    from .pipeline import PREVIEW_ENCODE
+
     cmd = [
         config.FFMPEG, "-y", "-v", "error",
         "-f", "rawvideo", "-pix_fmt", "rgb24",
@@ -79,13 +89,16 @@ def encode_command(
     if filters:
         cmd += ["-vf", ",".join(filters)]
 
-    enc = ENCODERS.get(settings.encode.codec, ENCODERS["libx264"])
-    cmd += [*enc, str(settings.encode.quality), "-pix_fmt", "yuv420p"]
+    if browser_preview:
+        cmd += [*PREVIEW_ENCODE, "-map", "0:v:0"]
+    else:
+        enc = ENCODERS.get(settings.encode.codec, ENCODERS["libx264"])
+        cmd += [*enc, str(settings.encode.quality), "-pix_fmt", "yuv420p"]
 
-    cmd += ["-map", "0:v:0", "-map", "1:a?"]
-    if settings.encode.container == "mkv":
-        cmd += ["-map", "1:s?", "-map_chapters", "1", "-c:s", "copy"]
-    cmd += ["-c:a", "copy"] if settings.encode.audio == "copy" else ["-c:a", "aac", "-b:a", "192k"]
+        cmd += ["-map", "0:v:0", "-map", "1:a?"]
+        if settings.encode.container == "mkv":
+            cmd += ["-map", "1:s?", "-map_chapters", "1", "-c:s", "copy"]
+        cmd += ["-c:a", "copy"] if settings.encode.audio == "copy" else ["-c:a", "aac", "-b:a", "192k"]
 
     cmd.append(output_path)
     return cmd
@@ -99,6 +112,8 @@ async def run_onnx(
     model_path: Path,
     on_progress: Callable[[float, Optional[float], Optional[float]], Awaitable[None]],
     cancel_event: asyncio.Event,
+    segment: Optional[tuple[float, float]] = None,
+    browser_preview: bool = False,
 ) -> None:
     width, height, fps = info["width"], info["height"], info["fps"]
     if not width or not height or not fps:
@@ -109,19 +124,21 @@ async def run_onnx(
     scale = await loop.run_in_executor(None, upscaler.probe_scale, 64, 64)
 
     decoder = await asyncio.create_subprocess_exec(
-        *decode_command(input_path, settings),
+        *decode_command(input_path, settings, segment),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         limit=width * height * 3 * 2,
     )
     encoder = await asyncio.create_subprocess_exec(
-        *encode_command(input_path, output_path, settings, width * scale, height * scale, fps),
+        *encode_command(input_path, output_path, settings, width * scale, height * scale, fps,
+                        browser_preview),
         stdin=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
 
     frame_bytes = width * height * 3
-    expected_frames = max(int(info["duration"] * fps), 1)
+    duration = segment[1] if segment else info["duration"]
+    expected_frames = max(int(duration * fps), 1)
     frames = 0
     started = time.monotonic()
     dec_err = asyncio.create_task(decoder.stderr.read())

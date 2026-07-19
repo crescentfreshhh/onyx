@@ -5,8 +5,8 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
-from . import config, db, media, modelstore, pipeline
-from .models import JobCreate, PresetCreate
+from . import config, db, media, modelstore, pipeline, previews
+from .models import JobCreate, PresetCreate, PreviewCreate
 from .queue import worker
 
 router = APIRouter(prefix="/api")
@@ -93,6 +93,36 @@ async def media_info(path: str):
     if info is None:
         raise HTTPException(422, "ffprobe could not read this file")
     return info
+
+
+@router.post("/preview", status_code=202)
+async def create_preview(body: PreviewCreate):
+    input_path = _safe_input_path(body.input_path)
+    if not input_path.is_file():
+        raise HTTPException(404, f"input file not found: {body.input_path}")
+    preview_id = previews.start(str(input_path), body.settings, body.start_seconds, body.duration)
+    return {"id": preview_id}
+
+
+@router.get("/preview/{preview_id}")
+def preview_status(preview_id: str):
+    preview = previews.get(preview_id)
+    if preview is None:
+        raise HTTPException(404, "no such preview")
+    return preview
+
+
+@router.get("/preview/{preview_id}/{side}")
+def preview_clip(preview_id: str, side: str):
+    if side not in ("original", "processed"):
+        raise HTTPException(404, "side must be 'original' or 'processed'")
+    preview = previews.get(preview_id)
+    if preview is None or preview["status"] != "ready":
+        raise HTTPException(404, "preview not ready")
+    file = previews.clip_path(preview_id, side)
+    if not file.is_file():
+        raise HTTPException(404, "clip missing")
+    return FileResponse(file, media_type="video/mp4")
 
 
 @router.get("/presets")

@@ -30,6 +30,10 @@ MANIFEST: list[dict[str, Any]] = [
         "url": "https://huggingface.co/Phips/2xNomosUni_compact_multijpg/resolve/main/2xNomosUni_compact_multijpg_fp32_opset17.onnx",
         "sha256": None,
         "license": "CC-BY-4.0",
+        "best_for": "Live action · compressed sources",
+        "description": "The general-purpose default. Trained on compression-degraded "
+                       "sources, so it cleans block/ring artifacts while upscaling — best "
+                       "for typical mixed-quality live-action video. Not for anime.",
     },
     {
         "id": "2x-hfa2k-compact",
@@ -41,8 +45,16 @@ MANIFEST: list[dict[str, Any]] = [
         "url": "https://huggingface.co/Phips/2xHFA2k_LUDVAE_compact/resolve/main/2xHFA2k_LUDVAE_compact_fp32_opset17.onnx",
         "sha256": None,
         "license": "CC-BY-4.0",
+        "best_for": "Anime · animation",
+        "description": "Animation specialist — excellent on line art and flat color. "
+                       "Never use on live action: it gives faces a waxy, plastic look.",
     },
 ]
+
+CUSTOM_DESCRIPTION = (
+    "Imported community model. Check its OpenModelDB page for the content "
+    "type it was trained on."
+)
 
 _downloads: dict[str, dict[str, Any]] = {}
 _lock = threading.Lock()
@@ -67,6 +79,8 @@ def _custom_models() -> list[dict[str, Any]]:
             "url": None,
             "sha256": None,
             "license": "unknown",
+            "best_for": "See model source",
+            "description": CUSTOM_DESCRIPTION,
         })
     return models
 
@@ -74,7 +88,8 @@ def _custom_models() -> list[dict[str, Any]]:
 def catalog() -> list[dict[str, Any]]:
     out = []
     for entry in MANIFEST + _custom_models():
-        item = {k: entry[k] for k in ("id", "name", "stage", "engine", "scale", "license")}
+        item = {k: entry[k] for k in ("id", "name", "stage", "engine", "scale", "license",
+                                      "best_for", "description")}
         path = config.MODELS_DIR / entry["filename"]
         with _lock:
             download = _downloads.get(entry["id"])
