@@ -56,5 +56,6 @@ export const api = {
       body: JSON.stringify({ input_path, settings, start_seconds }),
     }),
   previewStatus: (id: string) => request<Preview>(`/api/preview/${id}`),
+  deletePreview: (id: string) => request<void>(`/api/preview/${id}`, { method: "DELETE" }),
   previewUrl: (id: string, side: "original" | "processed") => `/api/preview/${id}/${side}`,
 };

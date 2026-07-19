@@ -27,6 +27,12 @@ def clip_path(preview_id: str, side: str):
     return PREVIEW_DIR / f"{preview_id}_{side}.mp4"
 
 
+def delete(preview_id: str) -> None:
+    _previews.pop(preview_id, None)
+    for side in ("original", "processed"):
+        clip_path(preview_id, side).unlink(missing_ok=True)
+
+
 def _prune() -> None:
     cutoff = time.time() - MAX_AGE_SECONDS
     for preview_id in [pid for pid, p in _previews.items() if p["created_at"] < cutoff]:

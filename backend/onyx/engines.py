@@ -47,7 +47,18 @@ def _make_session(model_path: Path):
         ) from exc
     available = ort.get_available_providers()
     providers = [p for p in PROVIDER_PREFERENCE if p in available] or available
-    session = ort.InferenceSession(str(model_path), providers=providers)
+    # Greedy arena growth causes spurious allocation failures with large
+    # (4K-class) tensors; allocate only what each request needs.
+    sess_options = ort.SessionOptions()
+    sess_options.enable_cpu_mem_arena = False
+    provider_options = [
+        {"arena_extend_strategy": "kSameAsRequested"} if p == "CUDAExecutionProvider" else {}
+        for p in providers
+    ]
+    session = ort.InferenceSession(
+        str(model_path), sess_options=sess_options,
+        providers=providers, provider_options=provider_options,
+    )
     log.info("model %s active providers: %s", model_path.name, session.get_providers())
     return session
 
@@ -307,15 +318,22 @@ async def run_ai(
             eta = (expected_out - frames_out) / proc_fps if proc_fps else None
             await on_progress(progress, round(proc_fps, 1) if proc_fps else None, eta)
 
-    async def process(frame: np.ndarray) -> np.ndarray:
-        if upscaler is not None:
-            return await loop.run_in_executor(None, upscaler.upscale, frame)
-        return frame
+    # When both stages run, interpolation happens at source resolution and
+    # each emitted frame is upscaled afterwards — peak memory is ~scale²
+    # lower than interpolating at upscaled resolution, and RIFE's motion
+    # estimation prefers native-res input anyway. Frames are carried as
+    # [raw, upscaled|None] pairs so endpoint frames are upscaled at most once.
+    async def upscaled(pair: list) -> np.ndarray:
+        if upscaler is None:
+            return pair[0]
+        if pair[1] is None:
+            pair[1] = await loop.run_in_executor(None, upscaler.upscale, pair[0])
+        return pair[1]
 
     # Output frame k sits at source position k * src_fps / out_fps; every
     # position inside interval [i-1, i) is synthesized from that frame pair.
     step = src_fps / out_fps
-    prev: Optional[np.ndarray] = None
+    prev: Optional[list] = None
 
     try:
         assert decoder.stdout is not None and encoder.stdin is not None
@@ -327,31 +345,36 @@ async def run_ai(
             except asyncio.IncompleteReadError:
                 break
             frame = np.frombuffer(raw, dtype=np.uint8).reshape(height, width, 3)
-            current = await process(frame)
+            current = [frame, None]
 
             if interpolator is None:
-                await emit(current)
+                await emit(await upscaled(current))
             elif prev is not None:
                 interval_start = frames_in - 1
-                is_cut = scene_change(prev, current) if settings.interpolate.scene_detect else False
+                is_cut = (
+                    scene_change(prev[0], current[0])
+                    if settings.interpolate.scene_detect else False
+                )
                 while frames_out * step < frames_in:
                     t = frames_out * step - interval_start
                     if t < 1e-3:
-                        await emit(prev)
+                        await emit(await upscaled(prev))
                     elif is_cut:
-                        await emit(prev if t < 0.5 else current)
+                        await emit(await upscaled(prev if t < 0.5 else current))
                     else:
-                        out = await loop.run_in_executor(
-                            None, interpolator.interpolate, prev, current, float(t)
+                        mid = await loop.run_in_executor(
+                            None, interpolator.interpolate, prev[0], current[0], float(t)
                         )
-                        await emit(out)
+                        if upscaler is not None:
+                            mid = await loop.run_in_executor(None, upscaler.upscale, mid)
+                        await emit(mid)
             prev = current
             frames_in += 1
 
         if interpolator is not None and prev is not None:
             total_out = int(frames_in * out_fps / src_fps)
             while frames_out < total_out:
-                await emit(prev)
+                await emit(await upscaled(prev))
 
         if cancel_event.is_set():
             raise asyncio.CancelledError()

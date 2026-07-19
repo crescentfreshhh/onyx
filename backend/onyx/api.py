@@ -126,6 +126,11 @@ def preview_status(preview_id: str):
     return preview
 
 
+@router.delete("/preview/{preview_id}", status_code=204)
+def delete_preview(preview_id: str):
+    previews.delete(preview_id)
+
+
 @router.get("/preview/{preview_id}/{side}")
 def preview_clip(preview_id: str, side: str):
     if side not in ("original", "processed"):

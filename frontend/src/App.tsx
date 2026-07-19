@@ -47,10 +47,17 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [refreshJobs]);
 
+  const clearPreview = useCallback(() => {
+    setPreview((current) => {
+      if (current) api.deletePreview(current.id).catch(() => {});
+      return null;
+    });
+  }, []);
+
   const selectFile = (path: string) => {
     setFile(path);
     setInfo(null);
-    setPreview(null);
+    clearPreview();
     api
       .mediaInfo(path)
       .then((mediaInfo) => {
@@ -77,7 +84,7 @@ export default function App() {
         else {
           setFile(null);
           setInfo(null);
-          setPreview(null);
+          clearPreview();
         }
       }
       return next;
@@ -104,6 +111,7 @@ export default function App() {
 
   const startPreview = (startSeconds: number) => {
     if (!file) return;
+    clearPreview();
     api
       .createPreview(file, settings, startSeconds)
       .then(({ id }) => {
@@ -150,7 +158,7 @@ export default function App() {
         files={files}
         info={info}
         preview={preview}
-        onClosePreview={() => setPreview(null)}
+        onClosePreview={clearPreview}
         onSelectFile={selectFile}
         onRemoveFile={removeFile}
       />
