@@ -112,6 +112,29 @@ def test_concat11_model_layout(tmp_path):
     assert abs(int(out.mean()) - 100) <= 1
 
 
+def test_sar_filter_only_for_non_square():
+    assert engines.sar_filter("4:3") == "setsar=4/3"
+    assert engines.sar_filter("64:45") == "setsar=64/45"
+    assert engines.sar_filter("1:1") is None
+    assert engines.sar_filter(None) is None
+    assert engines.sar_filter("0:1") is None
+    assert engines.sar_filter("N/A") is None
+
+
+def test_encode_command_applies_source_sar():
+    settings = JobSettings.model_validate({"interpolate": {"enabled": True, "fps": 60}})
+    cmd = engines.encode_command(
+        "/in.mkv", "/out.mkv", settings, 1440, 1080, 60,
+        ai_interpolated=True, sar="4:3",
+    )
+    vf = cmd[cmd.index("-vf") + 1]
+    assert "setsar=4/3" in vf
+    # square source adds no setsar
+    cmd2 = engines.encode_command("/in.mkv", "/out.mkv", settings, 1920, 1080, 60,
+                                  ai_interpolated=True, sar="1:1")
+    assert "setsar" not in " ".join(cmd2)
+
+
 def test_scene_change_detection():
     same = np.full((64, 64, 3), 100, dtype=np.uint8)
     assert not engines.scene_change(same, same)

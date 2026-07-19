@@ -61,4 +61,8 @@ def parse_probe(raw: dict) -> dict[str, Any]:
         "codec": video.get("codec_name", "unknown"),
         "interlaced": video.get("field_order", "progressive") not in ("progressive", "unknown", None),
         "size_bytes": int(fmt.get("size", 0) or 0),
+        # Pixel aspect ratio, e.g. "4:3" for anamorphic 1440x1080. The raw-
+        # frame engine works in square pixels, so this must be re-applied on
+        # encode or anamorphic sources come out horizontally squished.
+        "sar": video.get("sample_aspect_ratio"),
     }

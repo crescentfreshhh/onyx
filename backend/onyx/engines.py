@@ -59,7 +59,8 @@ def _make_session(model_path: Path):
         str(model_path), sess_options=sess_options,
         providers=providers, provider_options=provider_options,
     )
-    log.info("model %s active providers: %s", model_path.name, session.get_providers())
+    log.info("model %s active providers: %s",
+             getattr(model_path, "name", model_path), session.get_providers())
     return session
 
 
@@ -190,6 +191,20 @@ def decode_command(
     return cmd
 
 
+def sar_filter(sar: Optional[str]) -> Optional[str]:
+    """Return a setsar filter that restores the source pixel aspect, or None
+    for square/unknown pixels."""
+    if not sar:
+        return None
+    a, _, b = sar.partition(":")
+    try:
+        if int(a) <= 0 or int(b) <= 0 or a == b:
+            return None
+    except ValueError:
+        return None
+    return f"setsar={a}/{b}"
+
+
 def encode_command(
     input_path: str,
     output_path: str,
@@ -199,6 +214,7 @@ def encode_command(
     fps: float,
     browser_preview: bool = False,
     ai_interpolated: bool = False,
+    sar: Optional[str] = None,
 ) -> list[str]:
     cmd = [
         config.FFMPEG, "-y", "-v", "error",
@@ -208,6 +224,9 @@ def encode_command(
         "-i", input_path,
     ]
     filters = post_filters(settings, skip_interpolate=ai_interpolated)
+    setsar = sar_filter(sar)
+    if setsar:
+        filters = [setsar, *filters]
     if filters:
         cmd += ["-vf", ",".join(filters)]
 
@@ -261,7 +280,8 @@ async def run_ai(
 
     dec_cmd = decode_command(input_path, settings, segment)
     enc_cmd = encode_command(input_path, output_path, settings, out_w, out_h, out_fps,
-                             browser_preview, ai_interpolated=interpolator is not None)
+                             browser_preview, ai_interpolated=interpolator is not None,
+                             sar=info.get("sar"))
     log.info("ffmpeg decode: %s", " ".join(dec_cmd))
     log.info("ffmpeg encode: %s", " ".join(enc_cmd))
     decoder = await asyncio.create_subprocess_exec(
