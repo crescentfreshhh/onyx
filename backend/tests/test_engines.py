@@ -24,6 +24,9 @@ def tiny_model(tmp_path_factory):
         initializer=[scales],
     )
     model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
+    # Newer onnx libs stamp an IR version too new for older runtimes; pin it
+    # so the fixture loads on every onnxruntime we support.
+    model.ir_version = 10
     path = tmp_path_factory.mktemp("models") / "2x_test.onnx"
     onnx.save(model, str(path))
     return path

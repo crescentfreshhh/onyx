@@ -6,6 +6,7 @@ No intermediate frame files are ever written.
 """
 
 import asyncio
+import logging
 import time
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
@@ -16,11 +17,15 @@ from . import config
 from .models import JobSettings
 from .pipeline import ENCODERS, post_filters, pre_filters
 
+# TensorRT is deliberately absent: requesting it without the TensorRT
+# libraries raises at session creation, whereas CUDA degrades to CPU with a
+# logged warning. Revisit when the image actually ships TensorRT.
 PROVIDER_PREFERENCE = [
-    "TensorrtExecutionProvider",
     "CUDAExecutionProvider",
     "CPUExecutionProvider",
 ]
+
+log = logging.getLogger("onyx.engines")
 
 
 class OnnxUpscaler:
@@ -29,12 +34,13 @@ class OnnxUpscaler:
             import onnxruntime as ort
         except ImportError as exc:
             raise RuntimeError(
-                "onnxruntime is not installed — AI models are unavailable in this build"
+                f"onnxruntime failed to load ({exc}) — AI models are unavailable in this build"
             ) from exc
         available = ort.get_available_providers()
         providers = [p for p in PROVIDER_PREFERENCE if p in available] or available
         self.session = ort.InferenceSession(str(model_path), providers=providers)
         self.input_name = self.session.get_inputs()[0].name
+        log.info("model %s active providers: %s", model_path.name, self.session.get_providers())
 
     def upscale(self, frame: np.ndarray) -> np.ndarray:
         x = frame.astype(np.float32) / 255.0
