@@ -259,15 +259,19 @@ async def run_ai(
     duration = segment[1] if segment else info["duration"]
     expected_out = max(int(duration * out_fps), 1)
 
+    dec_cmd = decode_command(input_path, settings, segment)
+    enc_cmd = encode_command(input_path, output_path, settings, out_w, out_h, out_fps,
+                             browser_preview, ai_interpolated=interpolator is not None)
+    log.info("ffmpeg decode: %s", " ".join(dec_cmd))
+    log.info("ffmpeg encode: %s", " ".join(enc_cmd))
     decoder = await asyncio.create_subprocess_exec(
-        *decode_command(input_path, settings, segment),
+        *dec_cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         limit=width * height * 3 * 2,
     )
     encoder = await asyncio.create_subprocess_exec(
-        *encode_command(input_path, output_path, settings, out_w, out_h, out_fps,
-                        browser_preview, ai_interpolated=interpolator is not None),
+        *enc_cmd,
         stdin=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )

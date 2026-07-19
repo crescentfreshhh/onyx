@@ -7,11 +7,14 @@ settings schema and job flow do not change.
 """
 
 import asyncio
+import logging
 import time
 from typing import Awaitable, Callable, Optional
 
 from . import config
 from .models import JobSettings
+
+log = logging.getLogger("onyx.pipeline")
 
 # Built-in FFmpeg stage engines; installed ONNX models are appended by
 # stage_models() at request time.
@@ -186,6 +189,7 @@ async def run(
     browser_preview: bool = False,
 ) -> None:
     cmd = build_command(input_path, output_path, settings, segment, browser_preview)
+    log.info("ffmpeg (pipeline): %s", " ".join(cmd))
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
