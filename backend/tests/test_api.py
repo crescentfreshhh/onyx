@@ -1,6 +1,9 @@
 import importlib
 import os
+import shutil
+import subprocess
 import sys
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -88,6 +91,49 @@ def test_file_listing_filters_non_video(client):
     (client.input_dir / "subdir").mkdir()
     entries = client.get("/api/files").json()["entries"]
     assert [e["name"] for e in entries] == ["subdir", "movie.mkv"]
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not available")
+def test_cancel_terminates_running_job(tmp_path, monkeypatch):
+    monkeypatch.setenv("ONYX_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("ONYX_INPUT_DIR", str(tmp_path / "input"))
+    monkeypatch.setenv("ONYX_OUTPUT_DIR", str(tmp_path / "output"))
+    monkeypatch.delenv("ONYX_DISABLE_WORKER", raising=False)
+    for mod in [m for m in list(sys.modules) if m.startswith("onyx")]:
+        del sys.modules[mod]
+    main = importlib.import_module("onyx.main")
+
+    with TestClient(main.app) as client:
+        source = tmp_path / "input" / "long.mkv"
+        subprocess.run(
+            ["ffmpeg", "-v", "error", "-f", "lavfi", "-i",
+             "testsrc=duration=30:size=128x96:rate=25", "-pix_fmt", "yuv420p", str(source)],
+            check=True,
+        )
+        # minterpolate is slow enough that the job is reliably still running
+        # when the cancel lands.
+        job = client.post("/api/jobs", json={
+            "input_path": "long.mkv",
+            "settings": {"interpolate": {"enabled": True, "model": "minterpolate", "fps": 120}},
+        }).json()
+
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            status = client.get("/api/jobs").json()[0]["status"]
+            if status == "running":
+                break
+            time.sleep(0.2)
+        assert status == "running"
+
+        assert client.post(f"/api/jobs/{job['id']}/cancel").status_code == 200
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline:
+            status = client.get("/api/jobs").json()[0]["status"]
+            if status == "canceled":
+                break
+            time.sleep(0.2)
+        assert status == "canceled", f"job stuck in {status!r} after cancel"
+        assert not (tmp_path / "output" / "long_onyx.mkv").exists()
 
 
 def test_builtin_presets_seeded(client):

@@ -24,11 +24,21 @@ def _resolve_model(model_id: Optional[str]):
 class Worker:
     def __init__(self) -> None:
         self._task: Optional[asyncio.Task] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._wake = asyncio.Event()
         self._cancels: dict[int, asyncio.Event] = {}
 
     def start(self) -> None:
-        self._task = asyncio.create_task(self._loop())
+        self._loop = asyncio.get_running_loop()
+        self._task = asyncio.create_task(self._loop_task())
+
+    def _threadsafe(self, fn) -> None:
+        # API routes run in FastAPI's threadpool; asyncio primitives may only
+        # be signalled from the loop's own thread or the waiters never wake.
+        if self._loop is not None and self._loop.is_running():
+            self._loop.call_soon_threadsafe(fn)
+        else:
+            fn()
 
     async def stop(self) -> None:
         if self._task:
@@ -39,12 +49,12 @@ class Worker:
                 pass
 
     def notify(self) -> None:
-        self._wake.set()
+        self._threadsafe(self._wake.set)
 
     def cancel_job(self, job_id: int) -> bool:
         event = self._cancels.get(job_id)
         if event:
-            event.set()
+            self._threadsafe(event.set)
             return True
         job = db.get_job(job_id)
         if job and job["status"] == "queued":
@@ -52,7 +62,7 @@ class Worker:
             return True
         return False
 
-    async def _loop(self) -> None:
+    async def _loop_task(self) -> None:
         while True:
             job = db.next_queued_job()
             if job is None:
