@@ -99,11 +99,12 @@ class OnnxInterpolator:
     - one input [1,7,H,W]: img0 RGB + img1 RGB + timestep plane (vs-mlrt v1)
     - one input [1,11,H,W]: the vs-mlrt v2 representation — img0, img1,
       timestep, horizontal/vertical warp grids (2x/(W-1)-1 style) and the
-      two flow-normalization constant planes (2/(W-1), 2/(H-1)). v2 models
-      handle spatial padding internally, so none is applied here.
+      two flow-normalization constant planes (2/(W-1), 2/(H-1)), all built
+      at the padded size.
 
-    For the other layouts, spatial dims are reflect-padded to a multiple of
-    64 and cropped back, matching RIFE's alignment requirement.
+    For every layout, spatial dims are reflect-padded to a multiple of 64
+    and cropped back — RIFE's conv pyramid requires aligned dims (1080p
+    fails at 1080 and must run at 1088).
     """
 
     PAD = 64
@@ -148,14 +149,11 @@ class OnnxInterpolator:
         return x, h, w
 
     def interpolate(self, frame_a: np.ndarray, frame_b: np.ndarray, t: float) -> np.ndarray:
+        a, h, w = self._pad(_to_nchw(frame_a))
+        b, _, _ = self._pad(_to_nchw(frame_b))
         if self.mode == "concat11":
-            a = _to_nchw(frame_a)
-            b = _to_nchw(frame_b)
-            h, w = a.shape[2], a.shape[3]
             feeds = {self.names[0]: self.build_v2_input(a, b, t)}
         else:
-            a, h, w = self._pad(_to_nchw(frame_a))
-            b, _, _ = self._pad(_to_nchw(frame_b))
             if self.mode == "triple":
                 if self.t_rank >= 4:
                     t_val = np.full((1, 1, a.shape[2], a.shape[3]), t, dtype=np.float32)
