@@ -241,6 +241,61 @@ def diagnostics():
     }
 
 
+@router.get("/diagnostics/probe")
+async def diagnostics_probe(name: str = ""):
+    import stat as stat_mod
+
+    if name:
+        target = (config.OUTPUT_DIR / name).resolve()
+        if not target.is_relative_to(config.OUTPUT_DIR.resolve()) or not target.is_file():
+            raise HTTPException(404, "no such output file")
+    else:
+        latest = next((j for j in db.list_jobs() if j["status"] == "completed"), None)
+        if latest is None:
+            raise HTTPException(404, "no completed jobs to probe")
+        target = Path(latest["output_path"])
+        if not target.is_file():
+            raise HTTPException(404, f"output file missing: {target}")
+
+    st = target.stat()
+    result: dict = {
+        "file": target.name,
+        "size": st.st_size,
+        "mode": oct(stat_mod.S_IMODE(st.st_mode)),
+        "uid": st.st_uid,
+        "gid": st.st_gid,
+    }
+
+    probe = await asyncio.create_subprocess_exec(
+        config.FFPROBE, "-v", "error", "-print_format", "json",
+        "-show_format", "-show_streams", str(target),
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    pout, perr = await probe.communicate()
+    try:
+        parsed = json.loads(pout)
+        result["format"] = parsed.get("format", {}).get("format_name")
+        result["duration"] = parsed.get("format", {}).get("duration")
+        result["streams"] = [
+            {"type": s.get("codec_type"), "codec": s.get("codec_name"),
+             "w": s.get("width"), "h": s.get("height"),
+             "fps": s.get("avg_frame_rate"), "pix_fmt": s.get("pix_fmt")}
+            for s in parsed.get("streams", [])
+        ]
+    except json.JSONDecodeError:
+        result["ffprobe_error"] = perr.decode(errors="replace")[-600:]
+
+    decode = await asyncio.create_subprocess_exec(
+        config.FFMPEG, "-v", "error", "-i", str(target), "-f", "null", "-",
+        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+    )
+    _, derr = await decode.communicate()
+    result["decode_returncode"] = decode.returncode
+    result["decode_errors"] = derr.decode(errors="replace")[-800:]
+    result["playable"] = decode.returncode == 0 and not result.get("ffprobe_error")
+    return result
+
+
 @router.get("/system")
 def system_info():
     gpu = None
