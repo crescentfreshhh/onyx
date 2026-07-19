@@ -27,6 +27,17 @@ def list_jobs():
     return db.list_jobs()
 
 
+def _unique_output_path(stem: str, extension: str) -> Path:
+    # Never overwrite: skip names taken on disk or reserved by pending jobs.
+    reserved = set(db.active_output_paths())
+    candidate = config.OUTPUT_DIR / f"{stem}.{extension}"
+    n = 1
+    while candidate.exists() or str(candidate) in reserved:
+        candidate = config.OUTPUT_DIR / f"{stem} ({n}).{extension}"
+        n += 1
+    return candidate
+
+
 @router.post("/jobs", status_code=201)
 def create_job(body: JobCreate):
     input_path = _safe_input_path(body.input_path)
@@ -35,7 +46,7 @@ def create_job(body: JobCreate):
 
     container = body.settings.encode.container
     name = body.output_name or f"{input_path.stem}_onyx"
-    output_path = config.OUTPUT_DIR / f"{Path(name).stem}.{container}"
+    output_path = _unique_output_path(Path(name).stem, container)
 
     job = db.create_job(str(input_path), str(output_path), body.settings.model_dump())
     worker.notify()

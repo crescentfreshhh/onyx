@@ -39,6 +39,23 @@ def test_create_job_and_cancel(client):
     assert client.get("/api/jobs").json()[0]["status"] == "canceled"
 
 
+def test_output_collision_appends_suffix(client):
+    (client.input_dir / "movie.mkv").write_bytes(b"x")
+    first = client.post("/api/jobs", json={"input_path": "movie.mkv"}).json()
+    second = client.post("/api/jobs", json={"input_path": "movie.mkv"}).json()
+    third = client.post("/api/jobs", json={"input_path": "movie.mkv"}).json()
+    assert first["output_path"].endswith("movie_onyx.mkv")
+    assert second["output_path"].endswith("movie_onyx (1).mkv")
+    assert third["output_path"].endswith("movie_onyx (2).mkv")
+
+
+def test_output_collision_with_existing_file(client, tmp_path):
+    (client.input_dir / "movie.mkv").write_bytes(b"x")
+    (tmp_path / "output" / "movie_onyx.mkv").write_bytes(b"old render")
+    job = client.post("/api/jobs", json={"input_path": "movie.mkv"}).json()
+    assert job["output_path"].endswith("movie_onyx (1).mkv")
+
+
 def test_create_job_missing_file(client):
     resp = client.post("/api/jobs", json={"input_path": "nope.mkv"})
     assert resp.status_code == 404

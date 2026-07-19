@@ -15,6 +15,7 @@ export default function App() {
   const [presets, setPresets] = useState<Preset[]>([]);
   const [models, setModels] = useState<Record<string, StageModel[]>>({});
   const [settings, setSettings] = useState<JobSettings>(defaultSettings());
+  const [files, setFiles] = useState<string[]>([]);
   const [file, setFile] = useState<string | null>(null);
   const [info, setInfo] = useState<MediaInfo | null>(null);
   const [browsing, setBrowsing] = useState(false);
@@ -46,8 +47,7 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [refreshJobs]);
 
-  const openFile = (path: string) => {
-    setBrowsing(false);
+  const selectFile = (path: string) => {
     setFile(path);
     setInfo(null);
     setPreview(null);
@@ -62,12 +62,44 @@ export default function App() {
       .catch((e) => showError(String(e.message ?? e)));
   };
 
+  const openFiles = (paths: string[]) => {
+    setBrowsing(false);
+    if (paths.length === 0) return;
+    setFiles((prev) => [...prev, ...paths.filter((p) => !prev.includes(p))]);
+    selectFile(paths[0]);
+  };
+
+  const removeFile = (path: string) => {
+    setFiles((prev) => {
+      const next = prev.filter((p) => p !== path);
+      if (file === path) {
+        if (next.length > 0) selectFile(next[0]);
+        else {
+          setFile(null);
+          setInfo(null);
+          setPreview(null);
+        }
+      }
+      return next;
+    });
+  };
+
   const addToQueue = () => {
     if (!file) return;
     api
       .createJob(file, settings)
       .then(refreshJobs)
       .catch((e) => showError(String(e.message ?? e)));
+  };
+
+  const queueAll = () => {
+    Promise.allSettled(files.map((path) => api.createJob(path, settings))).then((results) => {
+      const failed = results.filter((r) => r.status === "rejected");
+      if (failed.length > 0) {
+        showError(`${failed.length} of ${files.length} files failed to queue`);
+      }
+      refreshJobs();
+    });
   };
 
   const startPreview = (startSeconds: number) => {
@@ -113,7 +145,15 @@ export default function App() {
         onOpen={() => setBrowsing(true)}
         onModels={() => setManagingModels(true)}
       />
-      <PreviewPane file={file} info={info} preview={preview} onClosePreview={() => setPreview(null)} />
+      <PreviewPane
+        file={file}
+        files={files}
+        info={info}
+        preview={preview}
+        onClosePreview={() => setPreview(null)}
+        onSelectFile={selectFile}
+        onRemoveFile={removeFile}
+      />
       <FilterPanel
         settings={settings}
         onChange={setSettings}
@@ -121,12 +161,14 @@ export default function App() {
         models={models}
         onSavePreset={savePreset}
         onAddToQueue={addToQueue}
+        onQueueAll={queueAll}
+        fileCount={files.length}
         onPreview={startPreview}
         previewBusy={preview?.status === "rendering"}
         canQueue={file != null}
       />
       <QueuePanel jobs={jobs} onChanged={refreshJobs} onError={showError} />
-      {browsing && <FileBrowser onSelect={openFile} onClose={() => setBrowsing(false)} />}
+      {browsing && <FileBrowser onSelect={openFiles} onClose={() => setBrowsing(false)} />}
       {managingModels && (
         <ModelManager
           onClose={() => {

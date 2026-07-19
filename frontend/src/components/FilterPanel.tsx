@@ -9,6 +9,8 @@ interface Props {
   models: Record<string, StageModel[]>;
   onSavePreset: (name: string) => void;
   onAddToQueue: () => void;
+  onQueueAll: () => void;
+  fileCount: number;
   onPreview: (startSeconds: number) => void;
   previewBusy: boolean;
   canQueue: boolean;
@@ -49,7 +51,7 @@ function Section({ title, enabled, onToggle, children }: SectionProps) {
   );
 }
 
-export function FilterPanel({ settings, onChange, presets, models, onSavePreset, onAddToQueue, onPreview, previewBusy, canQueue }: Props) {
+export function FilterPanel({ settings, onChange, presets, models, onSavePreset, onAddToQueue, onQueueAll, fileCount, onPreview, previewBusy, canQueue }: Props) {
   const [previewStart, setPreviewStart] = useState(0);
   const set = (patch: Partial<JobSettings>) => onChange({ ...settings, ...patch });
 
@@ -280,6 +282,11 @@ export function FilterPanel({ settings, onChange, presets, models, onSavePreset,
         <button className="primary" disabled={!canQueue} onClick={onAddToQueue}>
           Add to Queue
         </button>
+        {fileCount > 1 && (
+          <button className="primary" onClick={onQueueAll}>
+            Queue All {fileCount} Files
+          </button>
+        )}
       </div>
     </div>
   );

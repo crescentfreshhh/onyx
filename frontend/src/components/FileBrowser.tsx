@@ -3,7 +3,7 @@ import { api } from "../api";
 import type { FileEntry } from "../types";
 
 interface Props {
-  onSelect: (path: string) => void;
+  onSelect: (paths: string[]) => void;
   onClose: () => void;
 }
 
@@ -16,6 +16,7 @@ function fmtSize(bytes?: number): string {
 export function FileBrowser({ onSelect, onClose }: Props) {
   const [path, setPath] = useState("");
   const [entries, setEntries] = useState<FileEntry[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -29,12 +30,23 @@ export function FileBrowser({ onSelect, onClose }: Props) {
   }, [path]);
 
   const up = () => setPath(path.split("/").slice(0, -1).join("/"));
+  const fullPath = (name: string) => (path ? `${path}/${name}` : name);
+
+  const toggle = (name: string) => {
+    const full = fullPath(name);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(full)) next.delete(full);
+      else next.add(full);
+      return next;
+    });
+  };
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          Open Video
+          Open Videos
           <span className="path">/input/{path}</span>
         </div>
         <div className="file-list">
@@ -54,17 +66,28 @@ export function FileBrowser({ onSelect, onClose }: Props) {
               className="file-entry"
               key={entry.name}
               onClick={() =>
-                entry.type === "dir"
-                  ? setPath(path ? `${path}/${entry.name}` : entry.name)
-                  : onSelect(path ? `${path}/${entry.name}` : entry.name)
+                entry.type === "dir" ? setPath(fullPath(entry.name)) : onSelect([fullPath(entry.name)])
               }
             >
+              {entry.type === "file" && (
+                <input
+                  type="checkbox"
+                  checked={selected.has(fullPath(entry.name))}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={() => toggle(entry.name)}
+                />
+              )}
               {entry.type === "dir" ? "📁" : "🎬"} {entry.name}
               <span className="size">{fmtSize(entry.size)}</span>
             </div>
           ))}
         </div>
         <div className="modal-footer">
+          {selected.size > 0 && (
+            <button className="primary" onClick={() => onSelect([...selected])}>
+              Add {selected.size} file{selected.size > 1 ? "s" : ""}
+            </button>
+          )}
           <button onClick={onClose}>Close</button>
         </div>
       </div>

@@ -93,6 +93,14 @@ def list_jobs() -> list[dict]:
         return [_row_to_job(r) for r in rows]
 
 
+def active_output_paths() -> list[str]:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT output_path FROM jobs WHERE status IN ('queued', 'running')"
+        ).fetchall()
+        return [r["output_path"] for r in rows]
+
+
 def next_queued_job() -> Optional[dict]:
     with connect() as conn:
         row = conn.execute(

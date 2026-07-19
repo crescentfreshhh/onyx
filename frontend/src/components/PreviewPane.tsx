@@ -4,9 +4,12 @@ import type { MediaInfo, Preview } from "../types";
 
 interface Props {
   file: string | null;
+  files: string[];
   info: MediaInfo | null;
   preview: Preview | null;
   onClosePreview: () => void;
+  onSelectFile: (path: string) => void;
+  onRemoveFile: (path: string) => void;
 }
 
 function fmtDuration(seconds: number): string {
@@ -76,9 +79,32 @@ function CompareView({ previewId }: { previewId: string }) {
   );
 }
 
-export function PreviewPane({ file, info, preview, onClosePreview }: Props) {
+export function PreviewPane({ file, files, info, preview, onClosePreview, onSelectFile, onRemoveFile }: Props) {
   return (
     <div className="preview">
+      {files.length > 0 && (
+        <div className="file-tabs">
+          {files.map((path) => (
+            <div
+              key={path}
+              className={path === file ? "file-tab active" : "file-tab"}
+              onClick={() => path !== file && onSelectFile(path)}
+              title={path}
+            >
+              <span>{path.split("/").pop()}</span>
+              <button
+                className="tab-close"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemoveFile(path);
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="stage">
         {preview?.status === "ready" ? (
           <>
