@@ -21,7 +21,7 @@ import numpy as np
 
 from . import config
 from .models import JobSettings
-from .pipeline import ENCODERS, PREVIEW_ENCODE, post_filters, pre_filters
+from .pipeline import PREVIEW_ENCODE, encoder_args, post_filters, pre_filters
 
 # TensorRT is deliberately absent: requesting it without the TensorRT
 # libraries raises at session creation, whereas CUDA degrades to CPU with a
@@ -214,8 +214,8 @@ def encode_command(
     if browser_preview:
         cmd += [*PREVIEW_ENCODE, "-map", "0:v:0"]
     else:
-        enc = ENCODERS.get(settings.encode.codec, ENCODERS["libx264"])
-        cmd += [*enc, str(settings.encode.quality), "-pix_fmt", "yuv420p"]
+        cmd += encoder_args(settings.encode.codec, settings.encode.quality)
+        cmd += ["-pix_fmt", "yuv420p"]
 
         cmd += ["-map", "0:v:0", "-map", "1:a?"]
         if settings.encode.container == "mkv":

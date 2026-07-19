@@ -73,12 +73,20 @@ def stage_models() -> dict:
             })
     return merged
 
-ENCODERS = {
-    "libx264": ["-c:v", "libx264", "-preset", "slow", "-crf"],
-    "libx265": ["-c:v", "libx265", "-preset", "medium", "-crf"],
-    "h264_nvenc": ["-c:v", "h264_nvenc", "-preset", "p5", "-cq"],
-    "hevc_nvenc": ["-c:v", "hevc_nvenc", "-preset", "p5", "-cq"],
+# (args before the quality value, args after). NVENC constant-quality needs
+# an explicit rate-control mode AND -b:v 0, or it can emit an unplayable
+# stream that still exits 0.
+ENCODERS: dict[str, tuple[list[str], list[str]]] = {
+    "libx264": (["-c:v", "libx264", "-preset", "slow", "-crf"], []),
+    "libx265": (["-c:v", "libx265", "-preset", "medium", "-crf"], []),
+    "h264_nvenc": (["-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr", "-cq"], ["-b:v", "0"]),
+    "hevc_nvenc": (["-c:v", "hevc_nvenc", "-preset", "p5", "-rc", "vbr", "-cq"], ["-b:v", "0"]),
 }
+
+
+def encoder_args(codec: str, quality: int) -> list[str]:
+    pre, post = ENCODERS.get(codec, ENCODERS["libx264"])
+    return [*pre, str(quality), *post]
 
 
 def pre_filters(settings: JobSettings) -> list[str]:
@@ -151,8 +159,7 @@ def build_command(
     if browser_preview:
         cmd += PREVIEW_ENCODE
     else:
-        enc = ENCODERS.get(settings.encode.codec, ENCODERS["libx264"])
-        cmd += [*enc, str(settings.encode.quality)]
+        cmd += encoder_args(settings.encode.codec, settings.encode.quality)
         cmd += ["-pix_fmt", "yuv420p"]
 
         cmd += ["-map", "0:v:0", "-map", "0:a?"]

@@ -31,7 +31,11 @@ def test_command_maps_streams_and_encoder():
     assert cmd[0].endswith("ffmpeg")
     assert "-vf" not in cmd
     assert ["-c:v", "hevc_nvenc"] == cmd[cmd.index("-c:v"):cmd.index("-c:v") + 2]
+    # NVENC constant-quality needs explicit VBR + -b:v 0 or it can emit an
+    # unplayable stream.
     assert "-cq" in cmd and "22" in cmd
+    assert "-rc" in cmd and "vbr" in cmd
+    assert ["-b:v", "0"] == cmd[cmd.index("-b:v"):cmd.index("-b:v") + 2]
     assert ["-map", "0:v:0"] == cmd[cmd.index("0:v:0") - 1:cmd.index("0:v:0") + 1]
     assert "0:s?" in cmd and "-map_chapters" in cmd
     assert cmd[-1] == "/output/a.mkv"
