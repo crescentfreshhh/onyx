@@ -10,6 +10,8 @@ interface Props {
 const STATUS_LABEL: Record<CatalogModel["status"], string> = {
   installed: "Installed",
   downloading: "Downloading…",
+  converting: "Converting…",
+  convertible: "Needs conversion",
   available: "Not downloaded",
   failed: "Failed",
   missing: "Missing file",
@@ -48,7 +50,7 @@ export function ModelManager({ onClose, onChanged }: Props) {
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           AI Models
-          <span className="path">stored in /config/models — drop custom .onnx files there</span>
+          <span className="path">stored in /config/models — drop .onnx or .pth files there</span>
         </div>
         <div className="file-list">
           {error && <div style={{ padding: 16, color: "var(--danger)" }}>{error}</div>}
@@ -76,13 +78,22 @@ export function ModelManager({ onClose, onChanged }: Props) {
                   </div>
                 ) : (
                   <span
-                    className={`status-chip ${model.status === "installed" ? "status-completed" : model.status === "failed" ? "status-failed" : "status-queued"}`}
+                    className={`status-chip ${model.status === "installed" ? "status-completed" : model.status === "failed" ? "status-failed" : model.status === "converting" ? "status-running" : "status-queued"}`}
                   >
                     {STATUS_LABEL[model.status]}
                   </span>
                 )}
-                {(model.status === "available" || model.status === "failed") && (
+                {(model.status === "available" || (model.status === "failed" && model.kind !== "pth")) && (
                   <button onClick={() => download(model.id)}>Download</button>
+                )}
+                {(model.status === "convertible" || (model.status === "failed" && model.kind === "pth")) && (
+                  <button
+                    onClick={() =>
+                      api.convertModel(model.id).then(onChanged).catch((e) => setError(String(e.message ?? e)))
+                    }
+                  >
+                    Convert
+                  </button>
                 )}
               </div>
             </div>
@@ -91,7 +102,7 @@ export function ModelManager({ onClose, onChanged }: Props) {
         <div className="import-row">
           <input
             type="text"
-            placeholder="Paste a direct .onnx URL (e.g. from OpenModelDB) to import…"
+            placeholder="Paste a direct .onnx or .pth URL (e.g. from OpenModelDB) to import…"
             value={importUrl}
             onChange={(e) => setImportUrl(e.target.value)}
           />

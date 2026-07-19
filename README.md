@@ -9,9 +9,12 @@ and a familiar filter-stack web UI.
 > Runtime inference → FFmpeg encode, no intermediate frame files): download
 > compact SRVGGNet models from the in-app catalog, or drop any community
 > `.onnx` upscaler (OpenModelDB/chaiNNer ecosystem) into `/config/models`.
-> Deinterlacing and interpolation still use FFmpeg engines; RIFE and
-> SeedVR2-class engines (see [MODELS.md](MODELS.md)) are next. Catalog
-> download URLs are provisional until first-download verification.
+> PyTorch checkpoints (`.pth` — the common OpenModelDB format) are converted
+> to ONNX in-app via spandrel: drop the file in `/config/models` or paste its
+> URL, hit Convert, done. Deinterlacing and interpolation still use FFmpeg
+> engines; RIFE and SeedVR2-class engines (see [MODELS.md](MODELS.md)) are
+> next. Catalog download URLs are provisional until first-download
+> verification.
 
 ## Features
 

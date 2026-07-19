@@ -67,6 +67,11 @@ CUSTOM_DESCRIPTION = (
     "type it was trained on."
 )
 
+PTH_DESCRIPTION = (
+    "PyTorch checkpoint — convert it to ONNX to use it. Conversion runs once "
+    "and keeps the original file."
+)
+
 _downloads: dict[str, dict[str, Any]] = {}
 _imports: dict[str, dict[str, Any]] = {}
 _lock = threading.Lock()
@@ -77,7 +82,9 @@ def _custom_models() -> list[dict[str, Any]]:
     models = []
     if not config.MODELS_DIR.is_dir():
         return models
+    onnx_stems = []
     for path in sorted(config.MODELS_DIR.glob("*.onnx")):
+        onnx_stems.append(path.stem)
         if path.name in manifest_files:
             continue
         match = re.match(r"(\d+)x", path.stem.lower())
@@ -92,6 +99,25 @@ def _custom_models() -> list[dict[str, Any]]:
             "license": "unknown",
             "best_for": "See model source",
             "description": CUSTOM_DESCRIPTION,
+        })
+    for path in sorted(config.MODELS_DIR.glob("*.pth")):
+        stem = path.stem
+        # Hide checkpoints that already have a converted ONNX counterpart.
+        if any(s == stem or s.endswith(f"x_{stem}") for s in onnx_stems):
+            continue
+        match = re.match(r"(\d+)x", stem.lower())
+        models.append({
+            "id": f"pth:{path.name}",
+            "name": f"{stem} (PyTorch checkpoint)",
+            "stage": "enhance",
+            "engine": "onnx",
+            "kind": "pth",
+            "scale": int(match.group(1)) if match else 2,
+            "filename": path.name,
+            "sha256": None,
+            "license": "unknown",
+            "best_for": "See model source",
+            "description": PTH_DESCRIPTION,
         })
     return models
 
@@ -110,17 +136,20 @@ def catalog() -> list[dict[str, Any]]:
     for entry in _all_entries():
         item = {k: entry[k] for k in ("id", "name", "stage", "engine", "scale", "license",
                                       "best_for", "description")}
+        item["kind"] = entry.get("kind", "onnx")
         path = config.MODELS_DIR / entry["filename"]
         with _lock:
             download = _downloads.get(entry["id"])
-        if path.is_file():
-            item["status"] = "installed"
-        elif download and download["status"] == "downloading":
-            item["status"] = "downloading"
+        if download and download["status"] in ("downloading", "converting"):
+            item["status"] = download["status"]
             item["progress"] = download["progress"]
         elif download and download["status"] == "failed":
             item["status"] = "failed"
             item["error"] = download["error"]
+        elif entry.get("kind") == "pth":
+            item["status"] = "convertible"
+        elif path.is_file():
+            item["status"] = "installed"
         elif entry.get("urls"):
             item["status"] = "available"
         else:
@@ -159,8 +188,8 @@ def start_download(model_id: str) -> None:
 
 def start_import(url: str) -> str:
     filename = Path(urllib.parse.urlparse(url).path).name
-    if not filename.lower().endswith(".onnx"):
-        raise ValueError("URL must point directly to a .onnx file")
+    if not filename.lower().endswith((".onnx", ".pth")):
+        raise ValueError("URL must point directly to a .onnx or .pth file")
     filename = filename.replace("/", "_").replace("\\", "_")
     match = re.match(r"(\d+)x", filename.lower())
     entry = {
@@ -185,6 +214,70 @@ def start_import(url: str) -> str:
     thread = threading.Thread(target=_download, args=(entry,), daemon=True)
     thread.start()
     return entry["id"]
+
+
+def start_convert(model_id: str) -> None:
+    entry = find(model_id)
+    if entry is None or entry.get("kind") != "pth":
+        raise ValueError(f"no convertible checkpoint with id {model_id!r}")
+    with _lock:
+        active = _downloads.get(model_id)
+        if active and active["status"] == "converting":
+            return
+        _downloads[model_id] = {"status": "converting", "progress": 0.0}
+    thread = threading.Thread(target=_run_convert, args=(entry,), daemon=True)
+    thread.start()
+
+
+def _run_convert(entry: dict[str, Any]) -> None:
+    try:
+        _convert_file(config.MODELS_DIR / entry["filename"], entry["id"])
+    except Exception as exc:
+        with _lock:
+            _downloads[entry["id"]] = {"status": "failed", "error": str(exc), "progress": 0.0}
+
+
+def _convert_file(pth_path: Path, model_id: str) -> None:
+    """Convert a PyTorch checkpoint to ONNX next to it (spandrel + torch)."""
+    try:
+        import torch
+        from spandrel import ImageModelDescriptor, ModelLoader
+    except ImportError as exc:
+        raise RuntimeError(
+            "PyTorch/spandrel are not installed in this build — cannot convert .pth files"
+        ) from exc
+
+    descriptor = ModelLoader().load_from_file(str(pth_path))
+    if not isinstance(descriptor, ImageModelDescriptor):
+        raise RuntimeError("unsupported checkpoint (not an image-to-image model)")
+    if descriptor.input_channels != 3 or descriptor.output_channels != 3:
+        raise RuntimeError("only 3-channel RGB models are supported")
+
+    module = descriptor.model.eval()
+    scale = descriptor.scale
+    stem = pth_path.stem
+    target_stem = stem if re.match(r"\d+x", stem.lower()) else f"{scale}x_{stem}"
+    target = config.MODELS_DIR / f"{target_stem}.onnx"
+    tmp = target.with_suffix(".partial")
+
+    dummy = torch.rand(1, 3, 64, 64)
+    with torch.no_grad():
+        torch.onnx.export(
+            module,
+            (dummy,),
+            str(tmp),
+            input_names=["input"],
+            output_names=["output"],
+            dynamic_axes={
+                "input": {2: "height", 3: "width"},
+                "output": {2: "height_out", 3: "width_out"},
+            },
+            opset_version=17,
+            dynamo=False,
+        )
+    tmp.rename(target)
+    with _lock:
+        _downloads[model_id] = {"status": "installed", "progress": 1.0}
 
 
 def _fetch(url: str, partial: Path, model_id: str) -> str:
@@ -219,6 +312,11 @@ def _download(entry: dict[str, Any]) -> None:
                 if entry.get("sha256") and digest != entry["sha256"]:
                     raise RuntimeError("sha256 mismatch — refusing to install")
                 partial.rename(target)
+                if target.suffix == ".pth":
+                    with _lock:
+                        _downloads[model_id] = {"status": "converting", "progress": 0.0}
+                    _convert_file(target, model_id)
+                    return
                 with _lock:
                     _downloads[model_id] = {"status": "installed", "progress": 1.0}
                 return

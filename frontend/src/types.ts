@@ -65,7 +65,8 @@ export interface CatalogModel {
   license: string;
   best_for?: string;
   description?: string;
-  status: "installed" | "downloading" | "available" | "failed" | "missing";
+  kind: "onnx" | "pth";
+  status: "installed" | "downloading" | "converting" | "convertible" | "available" | "failed" | "missing";
   progress?: number;
   error?: string;
 }

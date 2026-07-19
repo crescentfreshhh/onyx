@@ -20,8 +20,13 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY backend/requirements.txt ./
+# torch+torchvision come from the CPU wheel index (conversion-only workload —
+# ONNX Runtime handles GPU inference); installing both together prevents pip
+# from swapping in the multi-GB CUDA torch build as torchvision's dependency.
 RUN python3 -m venv /venv \
-    && /venv/bin/pip install --no-cache-dir -r requirements.txt onnxruntime-gpu
+    && /venv/bin/pip install --no-cache-dir -r requirements.txt onnxruntime-gpu \
+    && /venv/bin/pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu \
+    && /venv/bin/pip install --no-cache-dir spandrel onnx
 
 COPY backend/onyx ./onyx
 COPY --from=ui /ui/dist ./static

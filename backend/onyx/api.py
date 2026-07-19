@@ -169,6 +169,15 @@ def import_model(body: ModelImport):
     return {"id": model_id}
 
 
+@router.post("/models/{model_id}/convert", status_code=202)
+def convert_model(model_id: str):
+    try:
+        modelstore.start_convert(model_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    return {"ok": True}
+
+
 @router.get("/system")
 def system_info():
     gpu = None

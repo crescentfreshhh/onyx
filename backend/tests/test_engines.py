@@ -135,11 +135,45 @@ def test_download_reports_failure_when_all_urls_fail(tmp_path, monkeypatch):
     assert "2 source(s) failed" in state["error"]
 
 
-def test_import_rejects_non_onnx_url():
+def test_import_rejects_unsupported_url():
     import pytest as _pytest
 
     with _pytest.raises(ValueError):
-        modelstore.start_import("https://example.com/model.pth")
+        modelstore.start_import("https://example.com/model.zip")
+
+
+def test_pth_conversion_end_to_end(tmp_path, monkeypatch):
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("spandrel")
+    from spandrel.architectures.Compact import Compact
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    monkeypatch.setattr(modelstore.config, "MODELS_DIR", models_dir)
+
+    net = Compact(num_in_ch=3, num_out_ch=3, num_feat=8, num_conv=2, upscale=2)
+    pth = models_dir / "testcompact.pth"
+    torch.save(net.state_dict(), pth)
+
+    entries = {m["id"]: m for m in modelstore.catalog()}
+    assert entries["pth:testcompact.pth"]["status"] == "convertible"
+
+    modelstore._downloads["pth:testcompact.pth"] = {"status": "converting", "progress": 0.0}
+    modelstore._convert_file(pth, "pth:testcompact.pth")
+
+    onnx_path = models_dir / "2x_testcompact.onnx"
+    assert onnx_path.is_file()
+    assert modelstore._downloads["pth:testcompact.pth"]["status"] == "installed"
+
+    # Checkpoint entry disappears once its ONNX counterpart exists.
+    ids = [m["id"] for m in modelstore.catalog()]
+    assert "pth:testcompact.pth" not in ids
+    assert "custom:2x_testcompact.onnx" in ids
+
+    pytest.importorskip("onnxruntime")
+    upscaler = engines.OnnxUpscaler(onnx_path)
+    out = upscaler.upscale(np.random.randint(0, 255, (10, 12, 3), dtype=np.uint8))
+    assert out.shape == (20, 24, 3)
 
 
 def test_import_downloads_and_appears_as_custom(tmp_path, monkeypatch):

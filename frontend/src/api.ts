@@ -39,6 +39,8 @@ export const api = {
   modelCatalog: () => request<CatalogModel[]>("/api/models/catalog"),
   downloadModel: (id: string) =>
     request<void>(`/api/models/${encodeURIComponent(id)}/download`, { method: "POST" }),
+  convertModel: (id: string) =>
+    request<void>(`/api/models/${encodeURIComponent(id)}/convert`, { method: "POST" }),
   importModel: (url: string) =>
     request<{ id: string }>("/api/models/import", {
       method: "POST",
