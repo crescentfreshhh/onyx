@@ -11,7 +11,10 @@ function summarize(job: Job): string {
   const s = job.settings;
   const parts: string[] = [];
   if (s.deinterlace?.enabled) parts.push("deinterlace");
-  if (s.enhance?.enabled) parts.push(`${s.enhance.scale}× upscale`);
+  if (s.enhance?.enabled) {
+    const model = s.enhance.model.replace(/^(custom:|import:)/, "");
+    parts.push(`${s.enhance.scale}× ${model}`);
+  }
   if (s.interpolate?.enabled) parts.push(`→${s.interpolate.fps}fps`);
   if (s.grain?.enabled) parts.push("grain");
   parts.push(s.encode?.codec ?? "");

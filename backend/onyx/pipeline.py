@@ -196,20 +196,24 @@ async def run(
     cancel_task = asyncio.create_task(watch_cancel())
     try:
         assert proc.stdout is not None
+        # ffmpeg emits fps= just before out_time_us= in each progress block;
+        # report them in a single update so downstream throttling can never
+        # starve progress/ETA in favour of fps.
+        last_fps: Optional[float] = None
         async for raw in proc.stdout:
             line = raw.decode(errors="replace").strip()
             key, _, value = line.partition("=")
-            if key == "out_time_us" and value.lstrip("-").isdigit() and total > 0:
+            if key == "fps" and value:
+                try:
+                    last_fps = float(value)
+                except ValueError:
+                    pass
+            elif key == "out_time_us" and value.lstrip("-").isdigit() and total > 0:
                 done = int(value) / 1_000_000
                 progress = min(done / total, 1.0)
                 elapsed = time.monotonic() - started
                 eta = (elapsed / progress - elapsed) if progress > 0.01 else None
-                await on_progress(progress, None, eta)
-            elif key == "fps" and value:
-                try:
-                    await on_progress(-1, float(value), None)
-                except ValueError:
-                    pass
+                await on_progress(progress, last_fps, eta)
         await proc.wait()
     finally:
         cancel_task.cancel()
