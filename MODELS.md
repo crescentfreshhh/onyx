@@ -89,6 +89,37 @@ default quality-tier presets:
   - **Blackwell requires CUDA 12.8+.** Base image must be new enough to cover
     both sm_86 and sm_120 in one build.
 
+## Diffusion tier — integration plan (SeedVR2 / FlashVSR)
+
+Generative video diffusion transformers (3–7B params, latent-space, temporal
+attention over frame windows, one-step distilled). They reconstruct detail
+rather than sharpen it — the Topaz-parity tier for degraded sources — at
+1–5 fps on a 12 GB card with fp8/GGUF checkpoints + block swap.
+
+Engineering required, in order:
+
+1. **Torch subprocess engine** beside the ONNX engine: wrap the model's own
+   inference code (SeedVR2 official scripts / numz standalone CLI, both with
+   block swap) as a worker speaking the existing raw-frame pipe protocol.
+   Queue/progress/cancel machinery unchanged.
+2. **Frame windowing** in the frame server: buffer N-frame windows with
+   overlap and seam blending (also unlocks TSPAN — temporal SPAN — as a
+   cheap middle tier at fast-tier cost).
+3. **Deployment**: CUDA torch adds ~3–4 GB. Preferred: runtime installer
+   into a /config venv ("Install diffusion engine") to keep :latest lean;
+   alternative is a separate :diffusion image tag.
+4. **Model bundles** in the manager: multi-file (DiT + VAE + config),
+   multi-GB resumable downloads, fp16/fp8/GGUF variant per VRAM budget.
+5. **VRAM knobs as job parameters**: block-swap depth, tiling, resolution
+   caps. Blackwell (RTX 5070) runs fp8 natively.
+6. **Wavelet color-correction post-pass** vs source (SeedVR2 outputs drift
+   color slightly; standard fix in its tooling).
+
+Order: SeedVR2-3B fp8 first (mature tooling, strongest restoration
+reputation), FlashVSR second (streaming design fits our pipes, younger
+tooling). Caveat to surface in UI: generative models can invent detail;
+preview before long renders, especially on faces.
+
 ## Design implications
 
 1. Two-tier model strategy baked into presets (fast vs quality).
