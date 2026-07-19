@@ -7,6 +7,7 @@ import { PreviewPane } from "./components/PreviewPane";
 import { FilterPanel } from "./components/FilterPanel";
 import { QueuePanel } from "./components/QueuePanel";
 import { FileBrowser } from "./components/FileBrowser";
+import { ModelManager } from "./components/ModelManager";
 
 export default function App() {
   const [system, setSystem] = useState<SystemInfo | null>(null);
@@ -17,6 +18,7 @@ export default function App() {
   const [file, setFile] = useState<string | null>(null);
   const [info, setInfo] = useState<MediaInfo | null>(null);
   const [browsing, setBrowsing] = useState(false);
+  const [managingModels, setManagingModels] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const showError = useCallback((message: string) => {
@@ -69,7 +71,11 @@ export default function App() {
 
   return (
     <div className="app">
-      <TopBar system={system} onOpen={() => setBrowsing(true)} />
+      <TopBar
+        system={system}
+        onOpen={() => setBrowsing(true)}
+        onModels={() => setManagingModels(true)}
+      />
       <PreviewPane file={file} info={info} />
       <FilterPanel
         settings={settings}
@@ -82,6 +88,15 @@ export default function App() {
       />
       <QueuePanel jobs={jobs} onChanged={refreshJobs} onError={showError} />
       {browsing && <FileBrowser onSelect={openFile} onClose={() => setBrowsing(false)} />}
+      {managingModels && (
+        <ModelManager
+          onClose={() => {
+            setManagingModels(false);
+            api.models().then(setModels).catch(() => {});
+          }}
+          onChanged={() => api.models().then(setModels).catch(() => {})}
+        />
+      )}
       {error && <div className="error-toast">{error}</div>}
     </div>
   );

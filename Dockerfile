@@ -20,7 +20,8 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY backend/requirements.txt ./
-RUN python3 -m venv /venv && /venv/bin/pip install --no-cache-dir -r requirements.txt
+RUN python3 -m venv /venv \
+    && /venv/bin/pip install --no-cache-dir -r requirements.txt onnxruntime-gpu
 
 COPY backend/onyx ./onyx
 COPY --from=ui /ui/dist ./static

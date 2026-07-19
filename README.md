@@ -5,10 +5,13 @@ frame interpolation, deinterlacing and restoration with a queue-based workflow
 and a familiar filter-stack web UI.
 
 > **Status: early development.** The queue, pipeline and web UI are functional.
-> The current processing stages run on FFmpeg placeholder engines (Lanczos
-> scaling, frame duplication/motion interpolation, BWDIF); the AI engines
-> (Real-ESRGAN, RIFE, SeedVR2 — see [MODELS.md](MODELS.md)) plug in behind the
-> same stage interfaces as the next milestone.
+> AI upscaling runs through an ONNX frame-server engine (FFmpeg decode → ONNX
+> Runtime inference → FFmpeg encode, no intermediate frame files): download
+> compact SRVGGNet models from the in-app catalog, or drop any community
+> `.onnx` upscaler (OpenModelDB/chaiNNer ecosystem) into `/config/models`.
+> Deinterlacing and interpolation still use FFmpeg engines; RIFE and
+> SeedVR2-class engines (see [MODELS.md](MODELS.md)) are next. Catalog
+> download URLs are provisional until first-download verification.
 
 ## Features
 

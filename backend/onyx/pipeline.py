@@ -13,8 +13,8 @@ from typing import Awaitable, Callable, Optional
 from . import config
 from .models import JobSettings
 
-# Stage catalog surfaced to the UI. engine="ffmpeg" entries are the v0
-# placeholders; AI engines will register alongside them.
+# Built-in FFmpeg stage engines; installed ONNX models are appended by
+# stage_models() at request time.
 STAGE_MODELS = {
     "enhance": [
         {"id": "lanczos", "name": "Lanczos (fast, non-AI)", "engine": "ffmpeg"},
@@ -29,6 +29,18 @@ STAGE_MODELS = {
     ],
 }
 
+
+def stage_models() -> dict:
+    from . import modelstore
+
+    merged = {stage: list(entries) for stage, entries in STAGE_MODELS.items()}
+    for model in modelstore.catalog():
+        if model["status"] == "installed":
+            merged.setdefault(model["stage"], []).append(
+                {"id": model["id"], "name": model["name"], "engine": model["engine"]}
+            )
+    return merged
+
 ENCODERS = {
     "libx264": ["-c:v", "libx264", "-preset", "slow", "-crf"],
     "libx265": ["-c:v", "libx265", "-preset", "medium", "-crf"],
@@ -37,13 +49,15 @@ ENCODERS = {
 }
 
 
-def build_filters(settings: JobSettings) -> list[str]:
+def pre_filters(settings: JobSettings) -> list[str]:
     filters: list[str] = []
     if settings.deinterlace.enabled:
         filters.append(settings.deinterlace.engine)
-    if settings.enhance.enabled and settings.enhance.scale > 1:
-        s = settings.enhance.scale
-        filters.append(f"scale=iw*{s}:ih*{s}:flags=lanczos")
+    return filters
+
+
+def post_filters(settings: JobSettings) -> list[str]:
+    filters: list[str] = []
     if settings.interpolate.enabled:
         fps = settings.interpolate.fps
         if settings.interpolate.model == "minterpolate":
@@ -53,6 +67,14 @@ def build_filters(settings: JobSettings) -> list[str]:
     if settings.grain.enabled and settings.grain.amount > 0:
         filters.append(f"noise=alls={settings.grain.amount}:allf=t")
     return filters
+
+
+def build_filters(settings: JobSettings) -> list[str]:
+    filters = pre_filters(settings)
+    if settings.enhance.enabled and settings.enhance.scale > 1:
+        s = settings.enhance.scale
+        filters.append(f"scale=iw*{s}:ih*{s}:flags=lanczos")
+    return filters + post_filters(settings)
 
 
 def build_command(input_path: str, output_path: str, settings: JobSettings) -> list[str]:

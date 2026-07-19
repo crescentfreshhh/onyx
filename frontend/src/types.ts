@@ -48,6 +48,18 @@ export interface StageModel {
   engine: string;
 }
 
+export interface CatalogModel {
+  id: string;
+  name: string;
+  stage: string;
+  engine: string;
+  scale: number;
+  license: string;
+  status: "installed" | "downloading" | "available" | "failed" | "missing";
+  progress?: number;
+  error?: string;
+}
+
 export interface SystemInfo {
   version: string;
   gpu: string | null;

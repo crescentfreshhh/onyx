@@ -1,4 +1,4 @@
-import type { Job, JobSettings, Preset, FileEntry, MediaInfo, StageModel, SystemInfo } from "./types";
+import type { CatalogModel, Job, JobSettings, Preset, FileEntry, MediaInfo, StageModel, SystemInfo } from "./types";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(url, init);
@@ -36,6 +36,9 @@ export const api = {
     }),
   deletePreset: (id: number) => request<void>(`/api/presets/${id}`, { method: "DELETE" }),
   models: () => request<Record<string, StageModel[]>>("/api/models"),
+  modelCatalog: () => request<CatalogModel[]>("/api/models/catalog"),
+  downloadModel: (id: string) =>
+    request<void>(`/api/models/${encodeURIComponent(id)}/download`, { method: "POST" }),
   system: () => request<SystemInfo>("/api/system"),
   streamUrl: (path: string) => `/api/files/stream?path=${encodeURIComponent(path)}`,
 };

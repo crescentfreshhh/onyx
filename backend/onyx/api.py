@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
-from . import config, db, media, pipeline
+from . import config, db, media, modelstore, pipeline
 from .models import JobCreate, PresetCreate
 from .queue import worker
 
@@ -113,7 +113,21 @@ def delete_preset(preset_id: int):
 
 @router.get("/models")
 def list_models():
-    return pipeline.STAGE_MODELS
+    return pipeline.stage_models()
+
+
+@router.get("/models/catalog")
+def models_catalog():
+    return modelstore.catalog()
+
+
+@router.post("/models/{model_id}/download", status_code=202)
+def download_model(model_id: str):
+    try:
+        modelstore.start_download(model_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    return {"ok": True}
 
 
 @router.get("/system")

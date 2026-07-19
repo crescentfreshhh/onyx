@@ -3,9 +3,10 @@ import type { SystemInfo } from "../types";
 interface Props {
   system: SystemInfo | null;
   onOpen: () => void;
+  onModels: () => void;
 }
 
-export function TopBar({ system, onOpen }: Props) {
+export function TopBar({ system, onOpen, onModels }: Props) {
   return (
     <div className="topbar">
       <div className="logo">
@@ -13,6 +14,7 @@ export function TopBar({ system, onOpen }: Props) {
       </div>
       <div className="version">v{system?.version ?? "…"}</div>
       <button onClick={onOpen}>Open Video…</button>
+      <button onClick={onModels}>Models…</button>
       <div className="spacer" />
       <div className="gpu">
         {system?.gpu ?? "No GPU detected"}

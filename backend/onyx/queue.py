@@ -3,7 +3,7 @@ import logging
 import time
 from typing import Optional
 
-from . import db, media, pipeline
+from . import db, engines, media, modelstore, pipeline
 from .models import JobSettings
 
 log = logging.getLogger("onyx.queue")
@@ -82,14 +82,31 @@ class Worker:
             if info is None:
                 raise RuntimeError("could not probe input file")
             settings = JobSettings.model_validate(job["settings"])
-            await pipeline.run(
-                job["input_path"],
-                job["output_path"],
-                settings,
-                info["duration"],
-                on_progress,
-                cancel,
-            )
+            enhance_model = settings.enhance.model if settings.enhance.enabled else None
+            if enhance_model and modelstore.find(enhance_model):
+                model_path = modelstore.installed_path(enhance_model)
+                if model_path is None:
+                    raise RuntimeError(
+                        f"model {enhance_model!r} is not installed — download it first"
+                    )
+                await engines.run_onnx(
+                    job["input_path"],
+                    job["output_path"],
+                    settings,
+                    info,
+                    model_path,
+                    on_progress,
+                    cancel,
+                )
+            else:
+                await pipeline.run(
+                    job["input_path"],
+                    job["output_path"],
+                    settings,
+                    info["duration"],
+                    on_progress,
+                    cancel,
+                )
             db.update_job(job_id, status="completed", progress=1.0, eta_seconds=None,
                           finished_at=time.time())
             log.info("job %d completed", job_id)
