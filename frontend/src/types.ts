@@ -3,7 +3,7 @@ export interface JobSettings {
   enhance: { enabled: boolean; model: string; scale: number };
   interpolate: { enabled: boolean; model: string; fps: number; scene_detect: boolean };
   grain: { enabled: boolean; amount: number };
-  encode: { codec: string; quality: number; container: string; audio: string };
+  encode: { codec: string; quality: number; container: string; audio: string; tag_filename: boolean };
 }
 
 export interface Job {
@@ -83,5 +83,5 @@ export const defaultSettings = (): JobSettings => ({
   enhance: { enabled: false, model: "lanczos", scale: 2 },
   interpolate: { enabled: false, model: "dup", fps: 60, scene_detect: true },
   grain: { enabled: false, amount: 4 },
-  encode: { codec: "libx264", quality: 18, container: "mkv", audio: "copy" },
+  encode: { codec: "libx264", quality: 18, container: "mkv", audio: "copy", tag_filename: false },
 });

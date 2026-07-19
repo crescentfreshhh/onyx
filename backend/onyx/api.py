@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 from . import config, db, media, modelstore, pipeline, previews
-from .models import JobCreate, ModelImport, PresetCreate, PreviewCreate
+from .models import JobCreate, ModelImport, PresetCreate, PreviewCreate, settings_tag
 from .queue import worker
 
 router = APIRouter(prefix="/api")
@@ -46,7 +46,10 @@ def create_job(body: JobCreate):
 
     container = body.settings.encode.container
     name = body.output_name or f"{input_path.stem}_onyx"
-    output_path = _unique_output_path(Path(name).stem, container)
+    stem = Path(name).stem
+    if body.settings.encode.tag_filename:
+        stem = f"{stem}_{settings_tag(body.settings)}"
+    output_path = _unique_output_path(stem, container)
 
     job = db.create_job(str(input_path), str(output_path), body.settings.model_dump())
     worker.notify()

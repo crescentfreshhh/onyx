@@ -85,10 +85,14 @@ class OnnxInterpolator:
     Supported input layouts (introspected from the graph):
     - three inputs, positional: img0 [1,3,H,W], img1 [1,3,H,W], timestep
       (scalar [1] or a [1,1,H,W] map)
-    - one input [1,7,H,W]: img0 RGB + img1 RGB + timestep plane (vs-mlrt style)
+    - one input [1,7,H,W]: img0 RGB + img1 RGB + timestep plane (vs-mlrt v1)
+    - one input [1,11,H,W]: the vs-mlrt v2 representation — img0, img1,
+      timestep, horizontal/vertical warp grids (2x/(W-1)-1 style) and the
+      two flow-normalization constant planes (2/(W-1), 2/(H-1)). v2 models
+      handle spatial padding internally, so none is applied here.
 
-    Spatial dims are reflect-padded to a multiple of 64 and cropped back,
-    matching RIFE's alignment requirement.
+    For the other layouts, spatial dims are reflect-padded to a multiple of
+    64 and cropped back, matching RIFE's alignment requirement.
     """
 
     PAD = 64
@@ -103,9 +107,26 @@ class OnnxInterpolator:
         elif len(inputs) == 1 and inputs[0].shape[1] == 7:
             self.mode = "concat7"
             self.names = [inputs[0].name]
+        elif len(inputs) == 1 and inputs[0].shape[1] == 11:
+            self.mode = "concat11"
+            self.names = [inputs[0].name]
         else:
             shapes = [(i.name, i.shape) for i in inputs]
             raise RuntimeError(f"unsupported interpolator input layout: {shapes}")
+
+    @staticmethod
+    def build_v2_input(a: np.ndarray, b: np.ndarray, t: float) -> np.ndarray:
+        h, w = a.shape[2], a.shape[3]
+        t_plane = np.full((1, 1, h, w), t, dtype=np.float32)
+        grid_h = np.broadcast_to(
+            np.linspace(-1.0, 1.0, w, dtype=np.float32), (1, 1, h, w)
+        )
+        grid_v = np.broadcast_to(
+            np.linspace(-1.0, 1.0, h, dtype=np.float32).reshape(1, 1, h, 1), (1, 1, h, w)
+        )
+        mult_h = np.full((1, 1, h, w), 2.0 / (w - 1), dtype=np.float32)
+        mult_w = np.full((1, 1, h, w), 2.0 / (h - 1), dtype=np.float32)
+        return np.concatenate([a, b, t_plane, grid_h, grid_v, mult_h, mult_w], axis=1)
 
     def _pad(self, x: np.ndarray) -> tuple[np.ndarray, int, int]:
         h, w = x.shape[2], x.shape[3]
@@ -116,17 +137,23 @@ class OnnxInterpolator:
         return x, h, w
 
     def interpolate(self, frame_a: np.ndarray, frame_b: np.ndarray, t: float) -> np.ndarray:
-        a, h, w = self._pad(_to_nchw(frame_a))
-        b, _, _ = self._pad(_to_nchw(frame_b))
-        if self.mode == "triple":
-            if self.t_rank >= 4:
-                t_val = np.full((1, 1, a.shape[2], a.shape[3]), t, dtype=np.float32)
-            else:
-                t_val = np.array([t], dtype=np.float32)
-            feeds = {self.names[0]: a, self.names[1]: b, self.names[2]: t_val}
+        if self.mode == "concat11":
+            a = _to_nchw(frame_a)
+            b = _to_nchw(frame_b)
+            h, w = a.shape[2], a.shape[3]
+            feeds = {self.names[0]: self.build_v2_input(a, b, t)}
         else:
-            t_plane = np.full((1, 1, a.shape[2], a.shape[3]), t, dtype=np.float32)
-            feeds = {self.names[0]: np.concatenate([a, b, t_plane], axis=1)}
+            a, h, w = self._pad(_to_nchw(frame_a))
+            b, _, _ = self._pad(_to_nchw(frame_b))
+            if self.mode == "triple":
+                if self.t_rank >= 4:
+                    t_val = np.full((1, 1, a.shape[2], a.shape[3]), t, dtype=np.float32)
+                else:
+                    t_val = np.array([t], dtype=np.float32)
+                feeds = {self.names[0]: a, self.names[1]: b, self.names[2]: t_val}
+            else:
+                t_plane = np.full((1, 1, a.shape[2], a.shape[3]), t, dtype=np.float32)
+                feeds = {self.names[0]: np.concatenate([a, b, t_plane], axis=1)}
         y = self.session.run(None, feeds)[0][:, :, :h, :w]
         return _to_uint8(y)
 
@@ -243,11 +270,35 @@ async def run_ai(
     dec_err = asyncio.create_task(decoder.stderr.read())
     enc_err = asyncio.create_task(encoder.stderr.read())
 
+    async def watch_cancel() -> None:
+        # Terminate both processes the moment cancel is requested so blocked
+        # pipe reads/writes unblock immediately instead of after the current
+        # (possibly slow) inference step.
+        await cancel_event.wait()
+        decoder.terminate()
+        encoder.terminate()
+
+    cancel_task = asyncio.create_task(watch_cancel())
+
+    async def encoder_failed() -> RuntimeError:
+        stderr = (await enc_err).decode(errors="replace")
+        return RuntimeError(
+            f"encode ffmpeg died (exit {encoder.returncode}): {stderr[-2000:]}"
+        )
+
     async def emit(frame: np.ndarray) -> None:
         nonlocal frames_out
         assert encoder.stdin is not None
-        encoder.stdin.write(frame.tobytes())
-        await encoder.stdin.drain()
+        if encoder.returncode is not None or encoder.stdin.is_closing():
+            raise await encoder_failed()
+        try:
+            encoder.stdin.write(frame.tobytes())
+            await encoder.stdin.drain()
+        except (BrokenPipeError, ConnectionResetError, RuntimeError):
+            if cancel_event.is_set():
+                raise asyncio.CancelledError()
+            await encoder.wait()
+            raise await encoder_failed()
         frames_out += 1
         if frames_out % 5 == 0:
             progress = min(frames_out / expected_out, 0.999)
@@ -302,6 +353,8 @@ async def run_ai(
             while frames_out < total_out:
                 await emit(prev)
 
+        if cancel_event.is_set():
+            raise asyncio.CancelledError()
         encoder.stdin.close()
         await asyncio.gather(decoder.wait(), encoder.wait())
     except asyncio.CancelledError:
@@ -310,6 +363,7 @@ async def run_ai(
         await asyncio.gather(decoder.wait(), encoder.wait())
         raise
     finally:
+        cancel_task.cancel()
         for task in (dec_err, enc_err):
             if not task.done():
                 task.cancel()

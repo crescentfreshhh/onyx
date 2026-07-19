@@ -1,6 +1,8 @@
 import asyncio
 import logging
+import shutil
 import time
+from pathlib import Path
 from typing import Optional
 
 from . import db, engines, media, modelstore, pipeline
@@ -92,6 +94,11 @@ class Worker:
             if info is None:
                 raise RuntimeError("could not probe input file")
             settings = JobSettings.model_validate(job["settings"])
+            if settings.encode.codec.endswith("_nvenc") and shutil.which("nvidia-smi") is None:
+                raise RuntimeError(
+                    "NVENC encoder selected but no NVIDIA GPU is available in this "
+                    "container — switch to a CPU encoder or fix GPU passthrough"
+                )
             enhance_path = _resolve_model(settings.enhance.model if settings.enhance.enabled else None)
             interp_path = _resolve_model(
                 settings.interpolate.model if settings.interpolate.enabled else None
@@ -120,9 +127,11 @@ class Worker:
                           finished_at=time.time())
             log.info("job %d completed", job_id)
         except asyncio.CancelledError:
+            Path(job["output_path"]).unlink(missing_ok=True)
             db.update_job(job_id, status="canceled", finished_at=time.time())
             log.info("job %d canceled", job_id)
         except Exception as exc:
+            Path(job["output_path"]).unlink(missing_ok=True)
             db.update_job(job_id, status="failed", error=str(exc), finished_at=time.time())
             log.exception("job %d failed", job_id)
         finally:

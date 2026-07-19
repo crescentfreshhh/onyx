@@ -56,6 +56,20 @@ def test_output_collision_with_existing_file(client, tmp_path):
     assert job["output_path"].endswith("movie_onyx (1).mkv")
 
 
+def test_tagged_filename(client):
+    (client.input_dir / "clip.mkv").write_bytes(b"x")
+    job = client.post("/api/jobs", json={
+        "input_path": "clip.mkv",
+        "settings": {
+            "enhance": {"enabled": True, "model": "custom:2xNomos.onnx", "scale": 2},
+            "interpolate": {"enabled": True, "model": "custom:rife_v4.6.onnx", "fps": 60},
+            "encode": {"tag_filename": True, "quality": 18, "codec": "libx264"},
+        },
+    }).json()
+    name = job["output_path"].rsplit("/", 1)[-1]
+    assert name == "clip_onyx_2x-2xNomos_60fps-rife_v4.6_crf18-libx264.mkv"
+
+
 def test_create_job_missing_file(client):
     resp = client.post("/api/jobs", json={"input_path": "nope.mkv"})
     assert resp.status_code == 404

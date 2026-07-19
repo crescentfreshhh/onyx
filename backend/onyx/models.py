@@ -31,6 +31,27 @@ class EncodeSettings(BaseModel):
     quality: int = Field(18, ge=0, le=51)
     container: Literal["mkv", "mp4"] = "mkv"
     audio: Literal["copy", "aac"] = "copy"
+    tag_filename: bool = False
+
+
+def settings_tag(settings: "JobSettings") -> str:
+    """Compact settings summary for output filenames, e.g.
+    '2x-NomosUni_60fps-rife_v4.6_crf18-libx264'."""
+    parts: list[str] = []
+    if settings.deinterlace.enabled:
+        parts.append(settings.deinterlace.engine)
+    if settings.enhance.enabled:
+        model = settings.enhance.model.split(":")[-1].rsplit(".", 1)[0]
+        parts.append(f"{settings.enhance.scale}x-{model}")
+    if settings.interpolate.enabled:
+        model = settings.interpolate.model.split(":")[-1].rsplit(".", 1)[0]
+        fps = f"{settings.interpolate.fps:g}"
+        parts.append(f"{fps}fps-{model}")
+    if settings.grain.enabled:
+        parts.append(f"grain{settings.grain.amount:g}")
+    parts.append(f"crf{settings.encode.quality}-{settings.encode.codec}")
+    tag = "_".join(parts)
+    return "".join(c if c.isalnum() or c in "._-" else "-" for c in tag)
 
 
 class JobSettings(BaseModel):

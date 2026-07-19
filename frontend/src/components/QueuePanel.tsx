@@ -23,8 +23,10 @@ function summarize(job: Job): string {
 
 function fmtEta(seconds: number | null): string {
   if (seconds == null) return "";
-  const m = Math.floor(seconds / 60);
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
   const s = Math.floor(seconds % 60);
+  if (h > 0) return `${h}h ${m}m ${s}s left`;
   return m > 0 ? `${m}m ${s}s left` : `${s}s left`;
 }
 

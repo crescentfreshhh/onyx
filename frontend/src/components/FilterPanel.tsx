@@ -275,6 +275,22 @@ export function FilterPanel({ settings, onChange, presets, models, onSavePreset,
               <option value="aac">AAC 192k</option>
             </select>
           </div>
+          <div className="field">
+            <label>Tag filename</label>
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={settings.encode.tag_filename}
+                onChange={(e) =>
+                  set({ encode: { ...settings.encode, tag_filename: e.target.checked } })
+                }
+              />
+              <span className="track" />
+            </label>
+            <span className="model-hint" style={{ flex: 1 }}>
+              Append model/fps/quality to the output name for A/B comparisons
+            </span>
+          </div>
         </div>
       </div>
 
