@@ -11,10 +11,13 @@ and a familiar filter-stack web UI.
 > `.onnx` upscaler (OpenModelDB/chaiNNer ecosystem) into `/config/models`.
 > PyTorch checkpoints (`.pth` — the common OpenModelDB format) are converted
 > to ONNX in-app via spandrel: drop the file in `/config/models` or paste its
-> URL, hit Convert, done. Deinterlacing and interpolation still use FFmpeg
-> engines; RIFE and SeedVR2-class engines (see [MODELS.md](MODELS.md)) are
-> next. Catalog download URLs are provisional until first-download
-> verification.
+> URL, hit Convert, done. Frame interpolation supports RIFE-class ONNX models
+> with true arbitrary timesteps (any source→target FPS), scene-change
+> detection, and combined upscale+interpolate in a single pass — import a
+> RIFE ONNX build (e.g. from vs-mlrt releases) via URL or drop it in
+> `/config/models`. Deinterlacing still uses FFmpeg engines; SeedVR2-class
+> diffusion restoration (see [MODELS.md](MODELS.md)) is next. Catalog
+> download URLs are provisional until first-download verification.
 
 ## Features
 

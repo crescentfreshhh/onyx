@@ -9,6 +9,16 @@ from .models import JobSettings
 log = logging.getLogger("onyx.queue")
 
 
+def _resolve_model(model_id: Optional[str]):
+    """Map an AI model id to its installed path; ffmpeg engine ids pass through as None."""
+    if not model_id or not modelstore.find(model_id):
+        return None
+    path = modelstore.installed_path(model_id)
+    if path is None:
+        raise RuntimeError(f"model {model_id!r} is not installed — download it first")
+    return path
+
+
 class Worker:
     def __init__(self) -> None:
         self._task: Optional[asyncio.Task] = None
@@ -82,21 +92,20 @@ class Worker:
             if info is None:
                 raise RuntimeError("could not probe input file")
             settings = JobSettings.model_validate(job["settings"])
-            enhance_model = settings.enhance.model if settings.enhance.enabled else None
-            if enhance_model and modelstore.find(enhance_model):
-                model_path = modelstore.installed_path(enhance_model)
-                if model_path is None:
-                    raise RuntimeError(
-                        f"model {enhance_model!r} is not installed — download it first"
-                    )
-                await engines.run_onnx(
+            enhance_path = _resolve_model(settings.enhance.model if settings.enhance.enabled else None)
+            interp_path = _resolve_model(
+                settings.interpolate.model if settings.interpolate.enabled else None
+            )
+            if enhance_path or interp_path:
+                await engines.run_ai(
                     job["input_path"],
                     job["output_path"],
                     settings,
                     info,
-                    model_path,
                     on_progress,
                     cancel,
+                    enhance_model=enhance_path,
+                    interp_model=interp_path,
                 )
             else:
                 await pipeline.run(

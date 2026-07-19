@@ -1,8 +1,14 @@
-"""ONNX frame-server engine.
+"""ONNX frame-server engines.
 
 Decode FFmpeg → raw RGB frames over a pipe → ONNX inference → raw frames into
 an encode FFmpeg that muxes audio/subtitles/chapters back in from the source.
 No intermediate frame files are ever written.
+
+Two model kinds run here:
+- upscalers: one frame in, one (scaled) frame out
+- interpolators (RIFE-class): two frames + a timestep t in (0,1) out to an
+  intermediate frame. Output frames are sampled at exact fractional source
+  positions, so any source→target fps ratio works directly.
 """
 
 import asyncio
@@ -15,7 +21,7 @@ import numpy as np
 
 from . import config
 from .models import JobSettings
-from .pipeline import ENCODERS, post_filters, pre_filters
+from .pipeline import ENCODERS, PREVIEW_ENCODE, post_filters, pre_filters
 
 # TensorRT is deliberately absent: requesting it without the TensorRT
 # libraries raises at session creation, whereas CUDA degrades to CPU with a
@@ -25,29 +31,45 @@ PROVIDER_PREFERENCE = [
     "CPUExecutionProvider",
 ]
 
+# Interpolating across a hard cut produces ghosting; above this mean-abs-diff
+# (0-1 scale) the nearest source frame is duplicated instead.
+SCENE_CHANGE_THRESHOLD = 0.12
+
 log = logging.getLogger("onyx.engines")
+
+
+def _make_session(model_path: Path):
+    try:
+        import onnxruntime as ort
+    except ImportError as exc:
+        raise RuntimeError(
+            f"onnxruntime failed to load ({exc}) — AI models are unavailable in this build"
+        ) from exc
+    available = ort.get_available_providers()
+    providers = [p for p in PROVIDER_PREFERENCE if p in available] or available
+    session = ort.InferenceSession(str(model_path), providers=providers)
+    log.info("model %s active providers: %s", model_path.name, session.get_providers())
+    return session
+
+
+def _to_nchw(frame: np.ndarray) -> np.ndarray:
+    x = frame.astype(np.float32) / 255.0
+    return np.transpose(x, (2, 0, 1))[np.newaxis]
+
+
+def _to_uint8(nchw: np.ndarray) -> np.ndarray:
+    y = np.clip(nchw[0], 0.0, 1.0)
+    return (np.transpose(y, (1, 2, 0)) * 255.0).round().astype(np.uint8)
 
 
 class OnnxUpscaler:
     def __init__(self, model_path: Path):
-        try:
-            import onnxruntime as ort
-        except ImportError as exc:
-            raise RuntimeError(
-                f"onnxruntime failed to load ({exc}) — AI models are unavailable in this build"
-            ) from exc
-        available = ort.get_available_providers()
-        providers = [p for p in PROVIDER_PREFERENCE if p in available] or available
-        self.session = ort.InferenceSession(str(model_path), providers=providers)
+        self.session = _make_session(model_path)
         self.input_name = self.session.get_inputs()[0].name
-        log.info("model %s active providers: %s", model_path.name, self.session.get_providers())
 
     def upscale(self, frame: np.ndarray) -> np.ndarray:
-        x = frame.astype(np.float32) / 255.0
-        x = np.transpose(x, (2, 0, 1))[np.newaxis]
-        y = self.session.run(None, {self.input_name: x})[0][0]
-        y = np.clip(y, 0.0, 1.0)
-        return (np.transpose(y, (1, 2, 0)) * 255.0).round().astype(np.uint8)
+        y = self.session.run(None, {self.input_name: _to_nchw(frame)})[0]
+        return _to_uint8(y)
 
     def probe_scale(self, width: int, height: int) -> int:
         out = self.upscale(np.zeros((height, width, 3), dtype=np.uint8))
@@ -55,6 +77,65 @@ class OnnxUpscaler:
         if scale < 1 or out.shape[0] != height * scale or out.shape[1] != width * scale:
             raise RuntimeError(f"model produced unexpected output shape {out.shape}")
         return scale
+
+
+class OnnxInterpolator:
+    """RIFE-class arbitrary-timestep interpolator.
+
+    Supported input layouts (introspected from the graph):
+    - three inputs, positional: img0 [1,3,H,W], img1 [1,3,H,W], timestep
+      (scalar [1] or a [1,1,H,W] map)
+    - one input [1,7,H,W]: img0 RGB + img1 RGB + timestep plane (vs-mlrt style)
+
+    Spatial dims are reflect-padded to a multiple of 64 and cropped back,
+    matching RIFE's alignment requirement.
+    """
+
+    PAD = 64
+
+    def __init__(self, model_path: Path):
+        self.session = _make_session(model_path)
+        inputs = self.session.get_inputs()
+        if len(inputs) >= 3:
+            self.mode = "triple"
+            self.names = [i.name for i in inputs[:3]]
+            self.t_rank = len(inputs[2].shape)
+        elif len(inputs) == 1 and inputs[0].shape[1] == 7:
+            self.mode = "concat7"
+            self.names = [inputs[0].name]
+        else:
+            shapes = [(i.name, i.shape) for i in inputs]
+            raise RuntimeError(f"unsupported interpolator input layout: {shapes}")
+
+    def _pad(self, x: np.ndarray) -> tuple[np.ndarray, int, int]:
+        h, w = x.shape[2], x.shape[3]
+        ph = (self.PAD - h % self.PAD) % self.PAD
+        pw = (self.PAD - w % self.PAD) % self.PAD
+        if ph or pw:
+            x = np.pad(x, ((0, 0), (0, 0), (0, ph), (0, pw)), mode="reflect")
+        return x, h, w
+
+    def interpolate(self, frame_a: np.ndarray, frame_b: np.ndarray, t: float) -> np.ndarray:
+        a, h, w = self._pad(_to_nchw(frame_a))
+        b, _, _ = self._pad(_to_nchw(frame_b))
+        if self.mode == "triple":
+            if self.t_rank >= 4:
+                t_val = np.full((1, 1, a.shape[2], a.shape[3]), t, dtype=np.float32)
+            else:
+                t_val = np.array([t], dtype=np.float32)
+            feeds = {self.names[0]: a, self.names[1]: b, self.names[2]: t_val}
+        else:
+            t_plane = np.full((1, 1, a.shape[2], a.shape[3]), t, dtype=np.float32)
+            feeds = {self.names[0]: np.concatenate([a, b, t_plane], axis=1)}
+        y = self.session.run(None, feeds)[0][:, :, :h, :w]
+        return _to_uint8(y)
+
+
+def scene_change(frame_a: np.ndarray, frame_b: np.ndarray,
+                 threshold: float = SCENE_CHANGE_THRESHOLD) -> bool:
+    a = frame_a[::8, ::8].astype(np.int16)
+    b = frame_b[::8, ::8].astype(np.int16)
+    return float(np.abs(a - b).mean()) / 255.0 > threshold
 
 
 def decode_command(
@@ -81,9 +162,8 @@ def encode_command(
     out_height: int,
     fps: float,
     browser_preview: bool = False,
+    ai_interpolated: bool = False,
 ) -> list[str]:
-    from .pipeline import PREVIEW_ENCODE
-
     cmd = [
         config.FFMPEG, "-y", "-v", "error",
         "-f", "rawvideo", "-pix_fmt", "rgb24",
@@ -91,7 +171,7 @@ def encode_command(
         "-i", "pipe:0",
         "-i", input_path,
     ]
-    filters = post_filters(settings)
+    filters = post_filters(settings, skip_interpolate=ai_interpolated)
     if filters:
         cmd += ["-vf", ",".join(filters)]
 
@@ -110,24 +190,38 @@ def encode_command(
     return cmd
 
 
-async def run_onnx(
+async def run_ai(
     input_path: str,
     output_path: str,
     settings: JobSettings,
     info: dict,
-    model_path: Path,
     on_progress: Callable[[float, Optional[float], Optional[float]], Awaitable[None]],
     cancel_event: asyncio.Event,
+    enhance_model: Optional[Path] = None,
+    interp_model: Optional[Path] = None,
     segment: Optional[tuple[float, float]] = None,
     browser_preview: bool = False,
 ) -> None:
-    width, height, fps = info["width"], info["height"], info["fps"]
-    if not width or not height or not fps:
+    width, height, src_fps = info["width"], info["height"], info["fps"]
+    if not width or not height or not src_fps:
         raise RuntimeError("could not determine source dimensions/framerate")
+    if enhance_model is None and interp_model is None:
+        raise RuntimeError("run_ai called without any AI model")
 
     loop = asyncio.get_running_loop()
-    upscaler = await loop.run_in_executor(None, OnnxUpscaler, model_path)
-    scale = await loop.run_in_executor(None, upscaler.probe_scale, 64, 64)
+    upscaler: Optional[OnnxUpscaler] = None
+    interpolator: Optional[OnnxInterpolator] = None
+    scale = 1
+    if enhance_model is not None:
+        upscaler = await loop.run_in_executor(None, OnnxUpscaler, enhance_model)
+        scale = await loop.run_in_executor(None, upscaler.probe_scale, 64, 64)
+    if interp_model is not None:
+        interpolator = await loop.run_in_executor(None, OnnxInterpolator, interp_model)
+
+    out_fps = settings.interpolate.fps if interpolator else src_fps
+    out_w, out_h = width * scale, height * scale
+    duration = segment[1] if segment else info["duration"]
+    expected_out = max(int(duration * out_fps), 1)
 
     decoder = await asyncio.create_subprocess_exec(
         *decode_command(input_path, settings, segment),
@@ -136,19 +230,41 @@ async def run_onnx(
         limit=width * height * 3 * 2,
     )
     encoder = await asyncio.create_subprocess_exec(
-        *encode_command(input_path, output_path, settings, width * scale, height * scale, fps,
-                        browser_preview),
+        *encode_command(input_path, output_path, settings, out_w, out_h, out_fps,
+                        browser_preview, ai_interpolated=interpolator is not None),
         stdin=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
 
     frame_bytes = width * height * 3
-    duration = segment[1] if segment else info["duration"]
-    expected_frames = max(int(duration * fps), 1)
-    frames = 0
+    frames_in = 0
+    frames_out = 0
     started = time.monotonic()
     dec_err = asyncio.create_task(decoder.stderr.read())
     enc_err = asyncio.create_task(encoder.stderr.read())
+
+    async def emit(frame: np.ndarray) -> None:
+        nonlocal frames_out
+        assert encoder.stdin is not None
+        encoder.stdin.write(frame.tobytes())
+        await encoder.stdin.drain()
+        frames_out += 1
+        if frames_out % 5 == 0:
+            progress = min(frames_out / expected_out, 0.999)
+            elapsed = time.monotonic() - started
+            proc_fps = frames_out / elapsed if elapsed > 0 else None
+            eta = (expected_out - frames_out) / proc_fps if proc_fps else None
+            await on_progress(progress, round(proc_fps, 1) if proc_fps else None, eta)
+
+    async def process(frame: np.ndarray) -> np.ndarray:
+        if upscaler is not None:
+            return await loop.run_in_executor(None, upscaler.upscale, frame)
+        return frame
+
+    # Output frame k sits at source position k * src_fps / out_fps; every
+    # position inside interval [i-1, i) is synthesized from that frame pair.
+    step = src_fps / out_fps
+    prev: Optional[np.ndarray] = None
 
     try:
         assert decoder.stdout is not None and encoder.stdin is not None
@@ -160,17 +276,31 @@ async def run_onnx(
             except asyncio.IncompleteReadError:
                 break
             frame = np.frombuffer(raw, dtype=np.uint8).reshape(height, width, 3)
-            out = await loop.run_in_executor(None, upscaler.upscale, frame)
-            encoder.stdin.write(out.tobytes())
-            await encoder.stdin.drain()
+            current = await process(frame)
 
-            frames += 1
-            if frames % 5 == 0:
-                progress = min(frames / expected_frames, 0.999)
-                elapsed = time.monotonic() - started
-                proc_fps = frames / elapsed if elapsed > 0 else None
-                eta = (expected_frames - frames) / proc_fps if proc_fps else None
-                await on_progress(progress, round(proc_fps, 1) if proc_fps else None, eta)
+            if interpolator is None:
+                await emit(current)
+            elif prev is not None:
+                interval_start = frames_in - 1
+                is_cut = scene_change(prev, current) if settings.interpolate.scene_detect else False
+                while frames_out * step < frames_in:
+                    t = frames_out * step - interval_start
+                    if t < 1e-3:
+                        await emit(prev)
+                    elif is_cut:
+                        await emit(prev if t < 0.5 else current)
+                    else:
+                        out = await loop.run_in_executor(
+                            None, interpolator.interpolate, prev, current, float(t)
+                        )
+                        await emit(out)
+            prev = current
+            frames_in += 1
+
+        if interpolator is not None and prev is not None:
+            total_out = int(frames_in * out_fps / src_fps)
+            while frames_out < total_out:
+                await emit(prev)
 
         encoder.stdin.close()
         await asyncio.gather(decoder.wait(), encoder.wait())
@@ -190,5 +320,5 @@ async def run_onnx(
     if encoder.returncode != 0:
         stderr = (await enc_err).decode(errors="replace")
         raise RuntimeError(f"encode ffmpeg exited with {encoder.returncode}: {stderr[-2000:]}")
-    if frames == 0:
-        raise RuntimeError("decoder produced no frames")
+    if frames_out == 0:
+        raise RuntimeError("no frames were produced")

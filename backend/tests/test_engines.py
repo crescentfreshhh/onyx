@@ -77,9 +77,9 @@ def test_onnx_pipeline_end_to_end(tiny_model, tmp_path):
         updates.append(progress)
 
     async def run():
-        await engines.run_onnx(
-            str(source), str(output), JobSettings(), info, tiny_model,
-            on_progress, asyncio.Event(),
+        await engines.run_ai(
+            str(source), str(output), JobSettings(), info,
+            on_progress, asyncio.Event(), enhance_model=tiny_model,
         )
 
     asyncio.run(run())

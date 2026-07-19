@@ -18,6 +18,7 @@ class InterpolateSettings(BaseModel):
     enabled: bool = False
     model: str = "dup"
     fps: float = Field(60, gt=0, le=480)
+    scene_detect: bool = True
 
 
 class GrainSettings(BaseModel):

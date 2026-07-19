@@ -172,6 +172,22 @@ export function FilterPanel({ settings, onChange, presets, models, onSavePreset,
           />
         </div>
         <div className="field">
+          <label>Scene detect</label>
+          <label className="toggle">
+            <input
+              type="checkbox"
+              checked={settings.interpolate.scene_detect}
+              onChange={(e) =>
+                set({ interpolate: { ...settings.interpolate, scene_detect: e.target.checked } })
+              }
+            />
+            <span className="track" />
+          </label>
+          <span className="model-hint" style={{ flex: 1 }}>
+            Skip interpolating across hard cuts (AI models only)
+          </span>
+        </div>
+        <div className="field">
           <label />
           <div className="fps-presets">
             {[23.976, 24, 25, 29.97, 30, 50, 59.94, 60, 120].map((fps) => (

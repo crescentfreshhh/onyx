@@ -79,17 +79,20 @@ async def _render(
             raise RuntimeError(f"source clip render failed: {stderr.decode(errors='replace')[-500:]}")
 
         processed = clip_path(preview_id, "processed")
-        model_id = settings.enhance.model if settings.enhance.enabled else None
-        if model_id and modelstore.find(model_id):
-            model_path = modelstore.installed_path(model_id)
-            if model_path is None:
-                raise RuntimeError(f"model {model_id!r} is not installed — download it first")
+        from .queue import _resolve_model
+
+        enhance_path = _resolve_model(settings.enhance.model if settings.enhance.enabled else None)
+        interp_path = _resolve_model(
+            settings.interpolate.model if settings.interpolate.enabled else None
+        )
+        if enhance_path or interp_path:
             info = await media.probe(input_path)
             if info is None:
                 raise RuntimeError("could not probe input file")
-            await engines.run_onnx(
-                input_path, str(processed), settings, info, model_path,
+            await engines.run_ai(
+                input_path, str(processed), settings, info,
                 _noop_progress, asyncio.Event(),
+                enhance_model=enhance_path, interp_model=interp_path,
                 segment=segment, browser_preview=True,
             )
         else:

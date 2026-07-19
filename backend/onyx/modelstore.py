@@ -72,6 +72,44 @@ PTH_DESCRIPTION = (
     "and keeps the original file."
 )
 
+INTERP_DESCRIPTION = (
+    "Frame interpolation model (RIFE-class): synthesizes in-between frames at "
+    "any timestep, enabling arbitrary FPS targets with real motion."
+)
+
+_stage_cache: dict[str, tuple[float, str]] = {}
+
+
+def _onnx_stage(path: Path) -> str:
+    """Classify a model file: interpolators take two image inputs (or say
+    'rife' in the filename); everything else is an enhance model."""
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return "enhance"
+    cached = _stage_cache.get(str(path))
+    if cached and cached[0] == mtime:
+        return cached[1]
+    stage = "enhance"
+    if "rife" in path.stem.lower():
+        stage = "interpolate"
+    else:
+        try:
+            import onnx
+
+            model = onnx.load(str(path), load_external_data=False)
+            initializers = {i.name for i in model.graph.initializer}
+            image_inputs = [
+                i for i in model.graph.input
+                if i.name not in initializers and len(i.type.tensor_type.shape.dim) == 4
+            ]
+            if len(image_inputs) >= 2:
+                stage = "interpolate"
+        except Exception:
+            pass
+    _stage_cache[str(path)] = (mtime, stage)
+    return stage
+
 _downloads: dict[str, dict[str, Any]] = {}
 _imports: dict[str, dict[str, Any]] = {}
 _lock = threading.Lock()
@@ -88,17 +126,18 @@ def _custom_models() -> list[dict[str, Any]]:
         if path.name in manifest_files:
             continue
         match = re.match(r"(\d+)x", path.stem.lower())
+        stage = _onnx_stage(path)
         models.append({
             "id": f"custom:{path.name}",
             "name": f"{path.stem} (imported)",
-            "stage": "enhance",
+            "stage": stage,
             "engine": "onnx",
-            "scale": int(match.group(1)) if match else 2,
+            "scale": int(match.group(1)) if match else (1 if stage == "interpolate" else 2),
             "filename": path.name,
             "sha256": None,
             "license": "unknown",
-            "best_for": "See model source",
-            "description": CUSTOM_DESCRIPTION,
+            "best_for": "Any framerate" if stage == "interpolate" else "See model source",
+            "description": INTERP_DESCRIPTION if stage == "interpolate" else CUSTOM_DESCRIPTION,
         })
     for path in sorted(config.MODELS_DIR.glob("*.pth")):
         stem = path.stem

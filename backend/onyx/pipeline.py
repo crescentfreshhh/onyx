@@ -105,9 +105,9 @@ def fps_expr(fps: float) -> str:
     return str(fps)
 
 
-def post_filters(settings: JobSettings) -> list[str]:
+def post_filters(settings: JobSettings, skip_interpolate: bool = False) -> list[str]:
     filters: list[str] = []
-    if settings.interpolate.enabled:
+    if settings.interpolate.enabled and not skip_interpolate:
         fps = fps_expr(settings.interpolate.fps)
         if settings.interpolate.model == "minterpolate":
             filters.append(f"minterpolate=fps={fps}:mi_mode=mci")
