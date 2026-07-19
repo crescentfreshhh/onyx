@@ -36,7 +36,13 @@ export default function App() {
     api.presets().then(setPresets).catch(() => {});
     api.models().then(setModels).catch(() => {});
     refreshJobs();
-    const timer = window.setInterval(refreshJobs, 1500);
+    let tick = 0;
+    const timer = window.setInterval(() => {
+      refreshJobs();
+      tick += 1;
+      // Newly downloaded/converted models appear without a page reload.
+      if (tick % 4 === 0) api.models().then(setModels).catch(() => {});
+    }, 1500);
     return () => window.clearInterval(timer);
   }, [refreshJobs]);
 
