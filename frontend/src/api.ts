@@ -39,6 +39,12 @@ export const api = {
   modelCatalog: () => request<CatalogModel[]>("/api/models/catalog"),
   downloadModel: (id: string) =>
     request<void>(`/api/models/${encodeURIComponent(id)}/download`, { method: "POST" }),
+  importModel: (url: string) =>
+    request<{ id: string }>("/api/models/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    }),
   system: () => request<SystemInfo>("/api/system"),
   streamUrl: (path: string) => `/api/files/stream?path=${encodeURIComponent(path)}`,
   createPreview: (input_path: string, settings: JobSettings, start_seconds: number) =>

@@ -17,6 +17,7 @@ const STATUS_LABEL: Record<CatalogModel["status"], string> = {
 
 export function ModelManager({ onClose, onChanged }: Props) {
   const [models, setModels] = useState<CatalogModel[]>([]);
+  const [importUrl, setImportUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -86,6 +87,29 @@ export function ModelManager({ onClose, onChanged }: Props) {
               </div>
             </div>
           ))}
+        </div>
+        <div className="import-row">
+          <input
+            type="text"
+            placeholder="Paste a direct .onnx URL (e.g. from OpenModelDB) to import…"
+            value={importUrl}
+            onChange={(e) => setImportUrl(e.target.value)}
+          />
+          <button
+            disabled={!importUrl.trim()}
+            onClick={() =>
+              api
+                .importModel(importUrl.trim())
+                .then(() => {
+                  setImportUrl("");
+                  setError(null);
+                  onChanged();
+                })
+                .catch((e) => setError(String(e.message ?? e)))
+            }
+          >
+            Import
+          </button>
         </div>
         <div className="modal-footer">
           <button onClick={onClose}>Close</button>

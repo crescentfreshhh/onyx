@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 from . import config, db, media, modelstore, pipeline, previews
-from .models import JobCreate, PresetCreate, PreviewCreate
+from .models import JobCreate, ModelImport, PresetCreate, PreviewCreate
 from .queue import worker
 
 router = APIRouter(prefix="/api")
@@ -158,6 +158,15 @@ def download_model(model_id: str):
     except ValueError as exc:
         raise HTTPException(404, str(exc))
     return {"ok": True}
+
+
+@router.post("/models/import", status_code=202)
+def import_model(body: ModelImport):
+    try:
+        model_id = modelstore.start_import(body.url)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"id": model_id}
 
 
 @router.get("/system")

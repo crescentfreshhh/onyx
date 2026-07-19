@@ -98,3 +98,64 @@ def test_custom_model_discovery(tmp_path, monkeypatch):
     assert entries[0]["scale"] == 4
     assert entries[0]["status"] == "installed"
     assert modelstore.installed_path("custom:4x_MySuperModel.onnx") is not None
+
+
+def test_download_falls_back_across_urls(tmp_path, monkeypatch):
+    models_dir = tmp_path / "models"
+    monkeypatch.setattr(modelstore.config, "MODELS_DIR", models_dir)
+    source = tmp_path / "payload.onnx"
+    source.write_bytes(b"model-bytes")
+    entry = {
+        "id": "test-model",
+        "filename": "2x_test_dl.onnx",
+        "sha256": None,
+        "urls": [
+            (tmp_path / "does_not_exist.onnx").as_uri(),
+            source.as_uri(),
+        ],
+    }
+    modelstore._downloads["test-model"] = {"status": "downloading", "progress": 0.0}
+    modelstore._download(entry)
+    assert (models_dir / "2x_test_dl.onnx").read_bytes() == b"model-bytes"
+    assert modelstore._downloads["test-model"]["status"] == "installed"
+
+
+def test_download_reports_failure_when_all_urls_fail(tmp_path, monkeypatch):
+    monkeypatch.setattr(modelstore.config, "MODELS_DIR", tmp_path / "models")
+    entry = {
+        "id": "test-fail",
+        "filename": "2x_fail.onnx",
+        "sha256": None,
+        "urls": [(tmp_path / "missing_a.onnx").as_uri(), (tmp_path / "missing_b.onnx").as_uri()],
+    }
+    modelstore._downloads["test-fail"] = {"status": "downloading", "progress": 0.0}
+    modelstore._download(entry)
+    state = modelstore._downloads["test-fail"]
+    assert state["status"] == "failed"
+    assert "2 source(s) failed" in state["error"]
+
+
+def test_import_rejects_non_onnx_url():
+    import pytest as _pytest
+
+    with _pytest.raises(ValueError):
+        modelstore.start_import("https://example.com/model.pth")
+
+
+def test_import_downloads_and_appears_as_custom(tmp_path, monkeypatch):
+    import time as _time
+
+    models_dir = tmp_path / "models"
+    monkeypatch.setattr(modelstore.config, "MODELS_DIR", models_dir)
+    source = tmp_path / "2x_imported.onnx"
+    source.write_bytes(b"imported-bytes")
+
+    model_id = modelstore.start_import(source.as_uri())
+    assert model_id == "import:2x_imported.onnx"
+    for _ in range(50):
+        if modelstore._downloads[model_id]["status"] != "downloading":
+            break
+        _time.sleep(0.1)
+    assert modelstore._downloads[model_id]["status"] == "installed"
+    assert (models_dir / "2x_imported.onnx").read_bytes() == b"imported-bytes"
+    assert any(m["id"] == "custom:2x_imported.onnx" for m in modelstore.catalog())

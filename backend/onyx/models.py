@@ -51,6 +51,10 @@ class PresetCreate(BaseModel):
     settings: JobSettings
 
 
+class ModelImport(BaseModel):
+    url: str
+
+
 class PreviewCreate(BaseModel):
     input_path: str
     settings: JobSettings = JobSettings()

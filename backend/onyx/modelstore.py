@@ -11,6 +11,7 @@ Two sources of AI models:
 import hashlib
 import re
 import threading
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Optional
@@ -27,7 +28,12 @@ MANIFEST: list[dict[str, Any]] = [
         "engine": "onnx",
         "scale": 2,
         "filename": "2xNomosUni_compact_multijpg.onnx",
-        "url": "https://huggingface.co/Phips/2xNomosUni_compact_multijpg/resolve/main/2xNomosUni_compact_multijpg_fp32_opset17.onnx",
+        "urls": [
+            "https://huggingface.co/Phips/2xNomosUni_compact_multijpg/resolve/main/2xNomosUni_compact_multijpg_fp32_opset17.onnx",
+            "https://huggingface.co/Phips/2xNomosUni_compact_multijpg/resolve/main/onnx/2xNomosUni_compact_multijpg_fp32_opset17.onnx",
+            "https://huggingface.co/Phips/2xNomosUni_compact_multijpg/resolve/main/2xNomosUni_compact_multijpg.onnx",
+            "https://huggingface.co/Phips/2xNomosUni_compact_multijpg/resolve/main/onnx/2xNomosUni_compact_multijpg.onnx",
+        ],
         "sha256": None,
         "license": "CC-BY-4.0",
         "best_for": "Live action · compressed sources",
@@ -42,7 +48,12 @@ MANIFEST: list[dict[str, Any]] = [
         "engine": "onnx",
         "scale": 2,
         "filename": "2xHFA2k_LUDVAE_compact.onnx",
-        "url": "https://huggingface.co/Phips/2xHFA2k_LUDVAE_compact/resolve/main/2xHFA2k_LUDVAE_compact_fp32_opset17.onnx",
+        "urls": [
+            "https://huggingface.co/Phips/2xHFA2k_LUDVAE_compact/resolve/main/2xHFA2k_LUDVAE_compact_fp32_opset17.onnx",
+            "https://huggingface.co/Phips/2xHFA2k_LUDVAE_compact/resolve/main/onnx/2xHFA2k_LUDVAE_compact_fp32_opset17.onnx",
+            "https://huggingface.co/Phips/2xHFA2k_LUDVAE_compact/resolve/main/2xHFA2k_LUDVAE_compact.onnx",
+            "https://huggingface.co/Phips/2xHFA2k_LUDVAE_compact/resolve/main/onnx/2xHFA2k_LUDVAE_compact.onnx",
+        ],
         "sha256": None,
         "license": "CC-BY-4.0",
         "best_for": "Anime · animation",
@@ -57,6 +68,7 @@ CUSTOM_DESCRIPTION = (
 )
 
 _downloads: dict[str, dict[str, Any]] = {}
+_imports: dict[str, dict[str, Any]] = {}
 _lock = threading.Lock()
 
 
@@ -76,7 +88,6 @@ def _custom_models() -> list[dict[str, Any]]:
             "engine": "onnx",
             "scale": int(match.group(1)) if match else 2,
             "filename": path.name,
-            "url": None,
             "sha256": None,
             "license": "unknown",
             "best_for": "See model source",
@@ -85,9 +96,18 @@ def _custom_models() -> list[dict[str, Any]]:
     return models
 
 
+def _all_entries() -> list[dict[str, Any]]:
+    custom = _custom_models()
+    custom_files = {m["filename"] for m in custom}
+    with _lock:
+        # In-flight URL imports that have not landed on disk yet.
+        pending = [e for e in _imports.values() if e["filename"] not in custom_files]
+    return MANIFEST + custom + pending
+
+
 def catalog() -> list[dict[str, Any]]:
     out = []
-    for entry in MANIFEST + _custom_models():
+    for entry in _all_entries():
         item = {k: entry[k] for k in ("id", "name", "stage", "engine", "scale", "license",
                                       "best_for", "description")}
         path = config.MODELS_DIR / entry["filename"]
@@ -101,7 +121,7 @@ def catalog() -> list[dict[str, Any]]:
         elif download and download["status"] == "failed":
             item["status"] = "failed"
             item["error"] = download["error"]
-        elif entry.get("url"):
+        elif entry.get("urls"):
             item["status"] = "available"
         else:
             item["status"] = "missing"
@@ -110,7 +130,7 @@ def catalog() -> list[dict[str, Any]]:
 
 
 def find(model_id: str) -> Optional[dict[str, Any]]:
-    for entry in MANIFEST + _custom_models():
+    for entry in _all_entries():
         if entry["id"] == model_id:
             return entry
     return None
@@ -126,7 +146,7 @@ def installed_path(model_id: str) -> Optional[Path]:
 
 def start_download(model_id: str) -> None:
     entry = find(model_id)
-    if entry is None or not entry.get("url"):
+    if entry is None or not entry.get("urls"):
         raise ValueError(f"no downloadable model with id {model_id!r}")
     with _lock:
         active = _downloads.get(model_id)
@@ -137,32 +157,75 @@ def start_download(model_id: str) -> None:
     thread.start()
 
 
+def start_import(url: str) -> str:
+    filename = Path(urllib.parse.urlparse(url).path).name
+    if not filename.lower().endswith(".onnx"):
+        raise ValueError("URL must point directly to a .onnx file")
+    filename = filename.replace("/", "_").replace("\\", "_")
+    match = re.match(r"(\d+)x", filename.lower())
+    entry = {
+        "id": f"import:{filename}",
+        "name": f"{Path(filename).stem} (imported)",
+        "stage": "enhance",
+        "engine": "onnx",
+        "scale": int(match.group(1)) if match else 2,
+        "filename": filename,
+        "urls": [url],
+        "sha256": None,
+        "license": "unknown",
+        "best_for": "See model source",
+        "description": CUSTOM_DESCRIPTION,
+    }
+    with _lock:
+        active = _downloads.get(entry["id"])
+        if active and active["status"] == "downloading":
+            return entry["id"]
+        _imports[entry["id"]] = entry
+        _downloads[entry["id"]] = {"status": "downloading", "progress": 0.0}
+    thread = threading.Thread(target=_download, args=(entry,), daemon=True)
+    thread.start()
+    return entry["id"]
+
+
+def _fetch(url: str, partial: Path, model_id: str) -> str:
+    digest = hashlib.sha256()
+    with urllib.request.urlopen(url, timeout=60) as resp:
+        total = int(resp.headers.get("Content-Length") or 0)
+        done = 0
+        with open(partial, "wb") as fh:
+            while True:
+                chunk = resp.read(1 << 20)
+                if not chunk:
+                    break
+                fh.write(chunk)
+                digest.update(chunk)
+                done += len(chunk)
+                if total:
+                    with _lock:
+                        _downloads[model_id]["progress"] = round(done / total, 3)
+    return digest.hexdigest()
+
+
 def _download(entry: dict[str, Any]) -> None:
     model_id = entry["id"]
     target = config.MODELS_DIR / entry["filename"]
     partial = target.with_suffix(".partial")
+    last_error: Optional[Exception] = None
     try:
         config.MODELS_DIR.mkdir(parents=True, exist_ok=True)
-        digest = hashlib.sha256()
-        with urllib.request.urlopen(entry["url"], timeout=60) as resp:
-            total = int(resp.headers.get("Content-Length") or 0)
-            done = 0
-            with open(partial, "wb") as fh:
-                while True:
-                    chunk = resp.read(1 << 20)
-                    if not chunk:
-                        break
-                    fh.write(chunk)
-                    digest.update(chunk)
-                    done += len(chunk)
-                    if total:
-                        with _lock:
-                            _downloads[model_id]["progress"] = round(done / total, 3)
-        if entry.get("sha256") and digest.hexdigest() != entry["sha256"]:
-            raise RuntimeError("sha256 mismatch — refusing to install")
-        partial.rename(target)
-        with _lock:
-            _downloads[model_id] = {"status": "installed", "progress": 1.0}
+        for url in entry["urls"]:
+            try:
+                digest = _fetch(url, partial, model_id)
+                if entry.get("sha256") and digest != entry["sha256"]:
+                    raise RuntimeError("sha256 mismatch — refusing to install")
+                partial.rename(target)
+                with _lock:
+                    _downloads[model_id] = {"status": "installed", "progress": 1.0}
+                return
+            except Exception as exc:
+                last_error = exc
+                partial.unlink(missing_ok=True)
+        raise RuntimeError(f"all {len(entry['urls'])} source(s) failed; last error: {last_error}")
     except Exception as exc:
         partial.unlink(missing_ok=True)
         with _lock:

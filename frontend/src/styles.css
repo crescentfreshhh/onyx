@@ -595,6 +595,18 @@ button:disabled {
   font-size: 11px;
 }
 
+.modal .import-row {
+  display: flex;
+  gap: 8px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.modal .import-row input {
+  flex: 1;
+  min-width: 0;
+}
+
 .modal .modal-footer {
   padding: 10px 16px;
   border-top: 1px solid var(--border);
