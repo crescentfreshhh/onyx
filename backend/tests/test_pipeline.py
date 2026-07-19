@@ -47,3 +47,24 @@ def test_unknown_codec_falls_back_to_x264():
     settings = JobSettings.model_validate({"encode": {"codec": "bogus"}})
     cmd = pipeline.build_command("/i.mkv", "/o.mkv", settings)
     assert "libx264" in cmd
+
+
+def test_arbitrary_fps_targets():
+    settings = JobSettings.model_validate({"interpolate": {"enabled": True, "fps": 72.5}})
+    assert pipeline.post_filters(settings) == ["fps=72.5"]
+
+
+def test_ntsc_rates_use_exact_rationals():
+    for decimal, rational in [(23.976, "24000/1001"), (29.97, "30000/1001"), (59.94, "60000/1001")]:
+        settings = JobSettings.model_validate({"interpolate": {"enabled": True, "fps": decimal}})
+        assert pipeline.post_filters(settings) == [f"fps={rational}"]
+
+
+def test_fps_out_of_range_rejected():
+    import pydantic
+    import pytest
+
+    with pytest.raises(pydantic.ValidationError):
+        JobSettings.model_validate({"interpolate": {"enabled": True, "fps": 0}})
+    with pytest.raises(pydantic.ValidationError):
+        JobSettings.model_validate({"interpolate": {"enabled": True, "fps": 500}})

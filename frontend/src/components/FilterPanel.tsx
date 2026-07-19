@@ -140,13 +140,31 @@ export function FilterPanel({ settings, onChange, presets, models, onSavePreset,
         </div>
         <div className="field">
           <label>Target FPS</label>
-          <select
+          <input
+            type="number"
+            min={1}
+            max={480}
+            step="any"
             value={settings.interpolate.fps}
-            onChange={(e) => set({ interpolate: { ...settings.interpolate, fps: Number(e.target.value) } })}
-          >
-            <option value={50}>50</option>
-            <option value={60}>60</option>
-          </select>
+            onChange={(e) => {
+              const fps = Number(e.target.value);
+              if (Number.isFinite(fps)) set({ interpolate: { ...settings.interpolate, fps } });
+            }}
+          />
+        </div>
+        <div className="field">
+          <label />
+          <div className="fps-presets">
+            {[23.976, 24, 25, 29.97, 30, 50, 59.94, 60, 120].map((fps) => (
+              <button
+                key={fps}
+                className={settings.interpolate.fps === fps ? "chip active" : "chip"}
+                onClick={() => set({ interpolate: { ...settings.interpolate, fps } })}
+              >
+                {fps}
+              </button>
+            ))}
+          </div>
         </div>
       </Section>
 

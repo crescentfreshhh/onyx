@@ -17,7 +17,7 @@ class EnhanceSettings(BaseModel):
 class InterpolateSettings(BaseModel):
     enabled: bool = False
     model: str = "dup"
-    fps: float = 60
+    fps: float = Field(60, gt=0, le=480)
 
 
 class GrainSettings(BaseModel):

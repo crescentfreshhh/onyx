@@ -56,10 +56,27 @@ def pre_filters(settings: JobSettings) -> list[str]:
     return filters
 
 
+# NTSC-family decimals are approximations; use exact rationals so long
+# renders don't drift against the audio track.
+NTSC_RATES = {
+    23.976: "24000/1001",
+    29.97: "30000/1001",
+    59.94: "60000/1001",
+    119.88: "120000/1001",
+}
+
+
+def fps_expr(fps: float) -> str:
+    for decimal, rational in NTSC_RATES.items():
+        if abs(fps - decimal) < 0.001:
+            return rational
+    return str(fps)
+
+
 def post_filters(settings: JobSettings) -> list[str]:
     filters: list[str] = []
     if settings.interpolate.enabled:
-        fps = settings.interpolate.fps
+        fps = fps_expr(settings.interpolate.fps)
         if settings.interpolate.model == "minterpolate":
             filters.append(f"minterpolate=fps={fps}:mi_mode=mci")
         else:

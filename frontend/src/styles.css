@@ -270,6 +270,25 @@ input:focus {
   background: #fff;
 }
 
+.fps-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  flex: 1;
+}
+
+button.chip {
+  padding: 3px 8px;
+  font-size: 11px;
+  border-radius: 10px;
+}
+
+button.chip.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
 /* buttons */
 button {
   background: var(--bg-raised);
