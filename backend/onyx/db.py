@@ -81,6 +81,19 @@ def create_job(input_path: str, output_path: str, settings: dict) -> dict:
         return _row_to_job(row)
 
 
+def find_active_duplicate(input_path: str, settings: dict) -> Optional[dict]:
+    """An identical job (same input and settings) already queued or running.
+    Prevents accidentally stacking duplicate renders that all produce the
+    same output."""
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM jobs WHERE input_path=? AND settings=? "
+            "AND status IN ('queued', 'running') ORDER BY id LIMIT 1",
+            (input_path, json.dumps(settings)),
+        ).fetchone()
+        return _row_to_job(row) if row else None
+
+
 def get_job(job_id: int) -> Optional[dict]:
     with connect() as conn:
         row = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()

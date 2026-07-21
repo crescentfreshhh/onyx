@@ -46,6 +46,12 @@ def create_job(body: JobCreate):
     if not input_path.is_file():
         raise HTTPException(404, f"input file not found: {body.input_path}")
 
+    settings = body.settings.model_dump()
+    existing = db.find_active_duplicate(str(input_path), settings)
+    if existing is not None:
+        # Same file + same settings already pending; don't stack a duplicate.
+        return existing
+
     container = body.settings.encode.container
     name = body.output_name or f"{input_path.stem}_onyx"
     stem = Path(name).stem
@@ -53,7 +59,7 @@ def create_job(body: JobCreate):
         stem = f"{stem}_{settings_tag(body.settings)}"
     output_path = _unique_output_path(stem, container)
 
-    job = db.create_job(str(input_path), str(output_path), body.settings.model_dump())
+    job = db.create_job(str(input_path), str(output_path), settings)
     worker.notify()
     return job
 

@@ -43,10 +43,20 @@ def test_create_job_and_cancel(client):
 
 
 def test_output_collision_appends_suffix(client):
+    # Distinct jobs (differing fps) must not clobber each other's output.
     (client.input_dir / "movie.mkv").write_bytes(b"x")
-    first = client.post("/api/jobs", json={"input_path": "movie.mkv"}).json()
-    second = client.post("/api/jobs", json={"input_path": "movie.mkv"}).json()
-    third = client.post("/api/jobs", json={"input_path": "movie.mkv"}).json()
+    first = client.post("/api/jobs", json={
+        "input_path": "movie.mkv",
+        "settings": {"interpolate": {"enabled": True, "fps": 50}},
+    }).json()
+    second = client.post("/api/jobs", json={
+        "input_path": "movie.mkv",
+        "settings": {"interpolate": {"enabled": True, "fps": 60}},
+    }).json()
+    third = client.post("/api/jobs", json={
+        "input_path": "movie.mkv",
+        "settings": {"interpolate": {"enabled": True, "fps": 30}},
+    }).json()
     assert first["output_path"].endswith("movie_onyx.mkv")
     assert second["output_path"].endswith("movie_onyx (1).mkv")
     assert third["output_path"].endswith("movie_onyx (2).mkv")
@@ -71,6 +81,22 @@ def test_tagged_filename(client):
     }).json()
     name = job["output_path"].rsplit("/", 1)[-1]
     assert name == "clip_onyx_2x-2xNomos_60fps-rife_v4.6_crf18-libx264.mkv"
+
+
+def test_identical_pending_job_not_duplicated(client):
+    (client.input_dir / "movie.mkv").write_bytes(b"x")
+    first = client.post("/api/jobs", json={"input_path": "movie.mkv"}).json()
+    second = client.post("/api/jobs", json={"input_path": "movie.mkv"}).json()
+    # same file + settings while still pending -> returns the existing job
+    assert first["id"] == second["id"]
+    assert len(client.get("/api/jobs").json()) == 1
+    # different settings -> a genuinely distinct job
+    third = client.post("/api/jobs", json={
+        "input_path": "movie.mkv",
+        "settings": {"interpolate": {"enabled": True, "fps": 60}},
+    }).json()
+    assert third["id"] != first["id"]
+    assert len(client.get("/api/jobs").json()) == 2
 
 
 def test_create_job_missing_file(client):
